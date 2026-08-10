@@ -294,6 +294,17 @@ function shortUrl(url: string): string {
     return url;
   }
 }
+
+/**
+ * Friendly label for a middleauth server. CAVE's daf-apis servers
+ * authenticate with a Google account, so say that instead of showing
+ * a hostname the user has never heard of.
+ */
+function serverLabel(url: string): string {
+  const host = shortUrl(url);
+  if (host.endsWith('daf-apis.com')) return 'Google login required';
+  return host;
+}
 </script>
 
 <template>
@@ -593,13 +604,13 @@ function shortUrl(url: string): string {
                 <span v-else-if="p.waiting" class="nge-holo-spinner"></span>
                 <span v-else class="nge-holo-dot"></span>
               </span>
-              <span class="nge-login-server-url">{{ shortUrl(p.serverUrl) }}</span>
+              <span class="nge-login-server-url" :title="shortUrl(p.serverUrl)">{{ serverLabel(p.serverUrl) }}</span>
               <button
                 v-if="!p.done"
                 class="nge-login-server-btn"
                 :disabled="p.waiting"
                 @click="doLogin(p)"
-              >{{ p.waiting ? 'LINKING…' : 'CONNECT' }}</button>
+              >{{ p.waiting ? 'LINKING…' : 'SIGN IN WITH GOOGLE' }}</button>
               <span v-else class="nge-login-server-ok">LINKED</span>
             </div>
           </div>
