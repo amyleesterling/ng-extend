@@ -171,6 +171,24 @@ export const useLayersStore = defineStore('layers', () => {
    *   - segment count decreased → merge (fewer segments = segments were combined)
    *   - segment count increased → split or new selection
    */
+  /** Cheap activity beacon for the CAVE edits sync: stamp users.last_edit_at
+   *  at most once per 10 minutes, so the server-side sync only queries CAVE
+   *  for users who actually edited since their mirror watermark (Amy: "do we
+   *  really need to query quiet users?"). Best-effort; stats never depend on
+   *  this locally. */
+  let lastEditTouch = 0;
+  async function touchLastEditAt() {
+    const now = Date.now();
+    if (now - lastEditTouch < 10 * 60 * 1000) return;
+    lastEditTouch = now;
+    try {
+      const backendStore = useProofreadingBackendStore();
+      if (!backendStore.userId) return;
+      await supabase.from('users').update({ last_edit_at: new Date().toISOString() })
+        .eq('id', backendStore.userId);
+    } catch { /* beacon only */ }
+  }
+
   function watchSegmentEdits() {
     if (!viewer) return;
 
@@ -301,6 +319,7 @@ export const useLayersStore = defineStore('layers', () => {
 
         statsStore.logDailyEdit(operation);
         statsStore.signalEdit(operation);
+        touchLastEditAt();
         // NOTE: cellsSubmitted is deliberately NOT touched here. It used to
         // be incremented every 5 edits "to animate the cell-dot canvas", but
         // it's a real stat (the Exploration badge track and the profile's

@@ -97,7 +97,7 @@ const supabaseHeaders = {
 };
 
 async function getAttributableUsers() {
-  const url = `${SUPABASE_URL}/rest/v1/users?select=id,display_name,cave_user_id&cave_user_id=not.is.null`;
+  const url = `${SUPABASE_URL}/rest/v1/users?select=id,display_name,cave_user_id,last_edit_at,last_cave_sync_at&cave_user_id=not.is.null`;
   const res = await fetch(url, { headers: supabaseHeaders });
   if (!res.ok) throw new Error(`users lookup failed: ${res.status} ${await res.text()}`);
   const rows = await res.json();
@@ -105,18 +105,36 @@ async function getAttributableUsers() {
   return rows;
 }
 
-/** Newest mirrored op timestamp for one dataset, or null when empty.
- *  Each run resumes from here (minus a safety margin) instead of a fixed
- *  window, so historical data is fetched exactly once and the steady-state
- *  query stays about a day wide (Amy/Forrest: never requery history). */
-async function mirrorLatestTs(dataset) {
-  const url = `${SUPABASE_URL}/rest/v1/cave_edits_mirror` +
-    `?select=timestamp&dataset=eq.${encodeURIComponent(dataset)}&order=timestamp.desc&limit=1`;
-  const res = await fetch(url, { headers: supabaseHeaders });
-  if (!res.ok) throw new Error(`mirror latest probe failed: ${res.status} ${await res.text()}`);
-  return (await res.json())[0]?.timestamp ?? null;
-}
 const RESUME_MARGIN_MS = 24 * 60 * 60 * 1000; // re-cover 1 day for stragglers
+
+// ── Activity-driven sync (Amy: "do we really need to query quiet users?") ──
+// The app witnesses every in-app edit, so CAVE is only consulted to
+// canonicalize activity we already saw:
+//   dirty  ==  last_edit_at > last_cave_sync_at   (both our clocks)
+// The client stamps last_edit_at on edits; we stamp last_cave_sync_at after
+// checking a user, which self-clears dirtiness and self-retries on failure.
+// A small drizzle of the longest-unchecked users each run catches edits
+// made outside the app with flat load. Quiet users cost zero.
+const DRIZZLE_PER_RUN = 3;
+
+/** Per (cave_user_id, dataset) newest mirrored op, each user's own window. */
+async function watermarkMap() {
+  const url = `${SUPABASE_URL}/rest/v1/cave_edits_watermarks?select=cave_user_id,dataset,newest`;
+  const res = await fetch(url, { headers: supabaseHeaders });
+  if (!res.ok) throw new Error(`watermarks probe failed: ${res.status} ${await res.text()}`);
+  const map = new Map();
+  for (const r of await res.json()) map.set(`${r.cave_user_id}|${r.dataset}`, r.newest);
+  return map;
+}
+
+/** Stamp a user as checked; failures leave them dirty for the next run. */
+async function stampSynced(userId, iso) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/users?id=eq.${encodeURIComponent(userId)}`, {
+    method: 'PATCH', headers: supabaseHeaders,
+    body: JSON.stringify({ last_cave_sync_at: iso }),
+  });
+  if (!res.ok) console.warn(`[sync-edits] sync stamp failed for ${userId}: ${res.status}`);
+}
 
 const sampleLogged = new Set();
 
@@ -206,21 +224,42 @@ async function upsertBatch(rows) {
 
   const endIso = new Date().toISOString();
 
+  // Pick who to check: everyone on --full-backfill; otherwise the dirty
+  // users (edited since we last checked them) plus a drizzle of the
+  // longest-unchecked, which also serves as the initial rolling backfill.
+  let syncUsers = users;
+  let wm = new Map();
+  if (!fullBackfill) {
+    try {
+      wm = await watermarkMap();
+      const dirty = users.filter(u =>
+        u.last_edit_at && (!u.last_cave_sync_at || Date.parse(u.last_edit_at) > Date.parse(u.last_cave_sync_at)));
+      const dirtyIds = new Set(dirty.map(u => u.id));
+      const drizzle = users
+        .filter(u => !dirtyIds.has(u.id))
+        .sort((a2, b2) => (a2.last_cave_sync_at ? Date.parse(a2.last_cave_sync_at) : 0) -
+                          (b2.last_cave_sync_at ? Date.parse(b2.last_cave_sync_at) : 0))
+        .slice(0, DRIZZLE_PER_RUN);
+      syncUsers = dirty.concat(drizzle);
+      console.log(`[sync-edits] ${dirty.length} dirty + ${drizzle.length} drizzle of ${users.length} users`);
+    } catch (e) {
+      console.warn(`[sync-edits] activity data unavailable (${e.message}), checking all users`);
+    }
+  }
+
   let failed = 0;
   const permissionWaits = [];
   for (const cfg of targets) {
-    // Per-dataset incremental window: resume just behind the newest
-    // mirrored op; full backfill only when this dataset's mirror is empty
-    // (or --full-backfill). No fixed lookback: a long outage widens the
-    // window instead of leaving a gap.
-    const latest = fullBackfill ? null : await mirrorLatestTs(cfg.dataset);
-    const startIso = latest
-      ? new Date(Date.parse(latest) - RESUME_MARGIN_MS).toISOString()
-      : EPOCH_START;
-    console.log(`[sync-edits] === ${cfg.dataset} (${cfg.pcgTable}) window ${startIso} → ${endIso}${latest ? '' : ' (FULL BACKFILL)'} ===`);
+    console.log(`[sync-edits] === ${cfg.dataset} (${cfg.pcgTable}) ===`);
     let tableTotal = 0;
-    for (const u of users) {
+    for (const u of syncUsers) {
       try {
+        // This user's own window: just behind their newest mirrored op in
+        // this dataset; no watermark means their personal full backfill.
+        const newest = fullBackfill ? null : wm.get(`${u.cave_user_id}|${cfg.dataset}`);
+        const startIso = newest
+          ? new Date(Date.parse(newest) - RESUME_MARGIN_MS).toISOString()
+          : EPOCH_START;
         const payload = await fetchUserOperations(cfg, u.cave_user_id, startIso, endIso);
         if (payload == null) { console.log(`[sync-edits] ${cfg.dataset}: endpoint 404 — skipping table`); break; }
         const ops = extractOperations(payload, `${cfg.dataset}`);
@@ -250,6 +289,10 @@ async function upsertBatch(rows) {
     }
     console.log(`[sync-edits] ${cfg.dataset}: upserted ${tableTotal} operations`);
   }
+  // Stamp everyone we checked; a user whose datasets all errored keeps an
+  // old stamp and stays dirty, so the next run retries them naturally.
+  for (const u of syncUsers) await stampSynced(u.id, endIso);
+
   if (permissionWaits.length) {
     console.error(`[sync-edits] WAITING on admin_view for: ${permissionWaits.join(', ')} (HANDOFF-BUGFIX-WIP.md 3.1). Green exit so the cron does not page anyone; these datasets resume the moment the grant lands.`);
   }
