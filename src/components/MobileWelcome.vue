@@ -18,8 +18,11 @@
 import neuronIcon from '../../static/badges/pyr/neuron-icon-white.png';
 
 /** loggedIn: after login the systems list becomes interactive links
- *  (tap Profile on the Guide to open the profile panel, etc.). */
-defineProps<{ show: boolean, loggedIn: boolean }>();
+ *  (tap Profile on the Guide to open the profile panel, etc.).
+ *  userName: shown in the signed-in status row so the sheet always says
+ *  where you stand — a hidden login button with no explanation reads as
+ *  "login is missing" (Amy 2026-08-24). */
+defineProps<{ show: boolean, loggedIn: boolean, userName?: string }>();
 
 const emit = defineEmits<{
   (e: 'hide'): void;
@@ -94,7 +97,7 @@ function shareEmail() {
         <!-- ── Home ── -->
         <div class="nge-mw-body">
           <div class="nge-mw-kicker">MOBILE UPLINK · LIMITED BANDWIDTH</div>
-          <h2 class="nge-mw-title">Welcome, scientist</h2>
+          <h2 class="nge-mw-title">Welcome, citizen</h2>
           <p class="nge-mw-copy">
             The full EyeWire II brain mapping interface needs a bigger
             screen. But your phone still has clearance. Start here:
@@ -139,8 +142,22 @@ function shareEmail() {
             </component>
           </div>
 
-          <button v-if="!loggedIn" class="nge-mw-cta" @click="emit('login')">
-            🔐 LOG IN · FULL ACCESS
+          <!-- Logged out: the mission invite IS the login path. Logged in:
+               an explicit status row instead — the sheet always shows where
+               you stand with the login system, never a silent gap. -->
+          <template v-if="!loggedIn">
+            <div class="nge-mw-divider"><span>YOUR MISSION</span></div>
+            <p class="nge-mw-invite">
+              EyeWire II is charted by citizen scientists — players who trace
+              real neurons and help neuroscientists map the connectome.
+            </p>
+            <button class="nge-mw-cta" @click="emit('login')">
+              🔐 BECOME A CITIZEN SCIENTIST
+            </button>
+            <div class="nge-mw-cta-sub">Log in · free · full access</div>
+          </template>
+          <button v-else class="nge-mw-signed" @click="openPanel('profile')">
+            ✓ CITIZEN SCIENTIST ON DUTY<template v-if="userName"> · {{ userName.toUpperCase() }}</template>
           </button>
 
           <div class="nge-mw-divider"><span>RECRUIT MORE SCIENTISTS</span></div>
@@ -490,6 +507,44 @@ function shareEmail() {
   box-shadow: 0 0 16px rgba(53, 181, 255, 0.18), inset 0 0 14px rgba(53, 181, 255, 0.08);
 }
 .nge-mw-cta:active { box-shadow: 0 0 22px rgba(53, 181, 255, 0.4); }
+
+.nge-mw-invite {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #aebfdd;
+  margin: 0;
+}
+
+.nge-mw-cta-sub {
+  margin-top: 6px;
+  text-align: center;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  color: rgba(143, 166, 204, 0.75);
+}
+
+/* Logged in: status row in the invite's place; tap opens the profile. */
+.nge-mw-signed {
+  display: block;
+  width: 100%;
+  margin-top: 11px;
+  padding: 10px;
+  border-radius: 9px;
+  background: rgba(0, 220, 120, 0.06);
+  border: 1px solid rgba(0, 220, 120, 0.35);
+  color: #b8f5d8;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nge-mw-signed:active { box-shadow: 0 0 16px rgba(0, 220, 120, 0.3); }
 
 /* Sheet transition */
 .nge-mw-enter-active,
