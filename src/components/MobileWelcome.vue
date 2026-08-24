@@ -17,14 +17,12 @@
 // not genomics: never the DNA emoji (Amy 2026-08-18).
 import neuronIcon from '../../static/badges/pyr/neuron-icon-white.png';
 
-import { watch } from 'vue';
-
 /** loggedIn: after login the systems list becomes interactive links
  *  (tap Profile on the Guide to open the profile panel, etc.).
  *  userName: shown in the signed-in status row so the sheet always says
  *  where you stand — a hidden login button with no explanation reads as
  *  "login is missing" (Amy 2026-08-24). */
-const props = defineProps<{ show: boolean, loggedIn: boolean, userName?: string }>();
+defineProps<{ show: boolean, loggedIn: boolean, userName?: string }>();
 
 const emit = defineEmits<{
   (e: 'hide'): void;
@@ -52,68 +50,11 @@ function dismiss() {
   emit('hide');
 }
 
-// ── Portal copy beta test (Amy 2026-08-24) ──────────────────────────────
-// Three social-proof lines above the login button. Each device is assigned
-// one at random and keeps it (localStorage), so a returning visitor sees a
-// consistent sheet. Impressions and login taps land in Supabase
-// (mobile_welcome_ab, insert-only RLS — see supabase-mobile-welcome-ab.sql)
-// keyed by an anonymous device id, so conversion per variant is countable.
-const AB_VARIANTS = [
-  { id: 'mapped-40k', text: 'People like you have mapped over 40,000 real neurons.' },
-  { id: 'identified-50k', text: 'People like you have identified over 50,000 real neurons.' },
-  { id: 'authors', text: 'People like you have become authors on real scientific publications.' },
-];
-const AB_VARIANT_KEY = 'nge_mw_ab_variant_v1';
-const AB_DEVICE_KEY = 'nge_mw_ab_device_v1';
-
-function abPersisted(key: string, make: () => string): string {
-  // Private mode etc.: fall back to a fresh value; the variant may then vary
-  // between visits, which only blurs the test, never breaks the sheet.
-  try {
-    let v = localStorage.getItem(key);
-    if (!v) { v = make(); localStorage.setItem(key, v); }
-    return v;
-  } catch { return make(); }
-}
-
-const abDeviceId = abPersisted(AB_DEVICE_KEY, () =>
-  Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join(''));
-const abVariantId = abPersisted(AB_VARIANT_KEY, () =>
-  AB_VARIANTS[Math.floor(Math.random() * AB_VARIANTS.length)]!.id);
-const abVariant = AB_VARIANTS.find(v => v.id === abVariantId) ?? AB_VARIANTS[0]!;
-
-function abLog(event: 'shown' | 'login_tap') {
-  // Fire-and-forget, same posture as util/error_reporting: a logging failure
-  // must never surface on the sheet.
-  (async () => {
-    try {
-      const { supabase } = await import('../supabase');
-      await supabase.from('mobile_welcome_ab').insert({
-        variant: abVariant.id,
-        event,
-        device_key: abDeviceId,
-        user_agent: navigator.userAgent.slice(0, 500),
-      });
-    } catch { /* swallow */ }
-  })();
-}
-
-// One impression per browser session (the Guide button reopens the sheet;
-// re-opens shouldn't inflate the shown count). Logged-in visitors see the
-// status row instead of the test copy, so they don't count.
-watch(() => props.show, (shown) => {
-  if (!shown || props.loggedIn) return;
-  try {
-    if (sessionStorage.getItem('nge_mw_ab_shown_v1') === '1') return;
-    sessionStorage.setItem('nge_mw_ab_shown_v1', '1');
-  } catch { /* still log — better a duplicate than a silent gap */ }
-  abLog('shown');
-}, { immediate: true });
-
-function ctaLogin() {
-  abLog('login_tap');
-  emit('login');
-}
+// Portal social-proof line. Three candidate copies were wired as an A/B/C
+// test with Supabase conversion logging (commit 182be75; schema kept in
+// supabase-mobile-welcome-ab.sql) but traffic is too thin to test yet, so
+// the strongest line ships fixed — see TODO.md to revive the test.
+const PORTAL_LINE = 'People like you have mapped over 40,000 real neurons.';
 
 /* The 101 explainers are the existing connectome.quest mobile experiences. */
 function openLearn() {
@@ -212,11 +153,11 @@ function shareEmail() {
                you stand with the login system, never a silent gap. -->
           <template v-if="!loggedIn">
             <div class="nge-mw-divider"><span>CITIZEN SCIENCE MOBILE PORTAL</span></div>
-            <p class="nge-mw-invite">{{ abVariant.text }}</p>
+            <p class="nge-mw-invite">{{ PORTAL_LINE }}</p>
             <!-- Straight into the Google auth popup (via nge:request-login in
                  ExtensionBar/LoginModal) — no second Log in tap on the
                  Identity Verification box. -->
-            <button class="nge-mw-cta" @click="ctaLogin">
+            <button class="nge-mw-cta" @click="emit('login')">
               🔐 LOG IN WITH GOOGLE
             </button>
             <div class="nge-mw-cta-sub">Become a citizen scientist · free · full access</div>
