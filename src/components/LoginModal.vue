@@ -167,6 +167,18 @@ function dismiss() {
   // dataset switches) and we need the observer to react to them.
 }
 
+/**
+ * Mobile welcome sheet's LOG IN WITH GOOGLE button: start auth immediately
+ * instead of making the user tap Log in a second time here. Dispatched
+ * synchronously from the tap, so doLogin's window.open keeps the
+ * user-gesture flag. If no login prompt has surfaced yet, re-scan and try
+ * once more; failing that the modal simply stays visible as before.
+ */
+function requestLogin() {
+  scanForLoginPrompts();
+  loginAll();
+}
+
 function handleLoginSuccess() {
   console.log('[LoginModal] middleauthlogin event fired — marking waiting prompts as done');
   // Mark waiting prompts as done. Their DOM elements stay in
@@ -266,6 +278,9 @@ onMounted(() => {
   // dismisses identity verification (same as tapping BYPASS).
   document.addEventListener('nge:dismiss-login', dismiss);
 
+  // Mobile welcome sheet's login button: jump straight into the auth popup.
+  document.addEventListener('nge:request-login', requestLogin);
+
   // Try to find statusContainer immediately
   if (!watchForStatusContainer()) {
     // Not created yet — observe the neuroglancer container for its creation
@@ -301,6 +316,7 @@ onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer);
   window.removeEventListener('middleauthlogin', handleLoginSuccess);
   document.removeEventListener('nge:dismiss-login', dismiss);
+  document.removeEventListener('nge:request-login', requestLogin);
 });
 
 function shortUrl(url: string): string {

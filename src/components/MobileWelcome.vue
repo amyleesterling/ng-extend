@@ -146,15 +146,18 @@ function shareEmail() {
                an explicit status row instead — the sheet always shows where
                you stand with the login system, never a silent gap. -->
           <template v-if="!loggedIn">
-            <div class="nge-mw-divider"><span>YOUR MISSION</span></div>
+            <div class="nge-mw-divider"><span>CITIZEN SCIENCE MOBILE PORTAL</span></div>
             <p class="nge-mw-invite">
               EyeWire II is charted by citizen scientists — players who trace
               real neurons and help neuroscientists map the connectome.
             </p>
+            <!-- Straight into the Google auth popup (via nge:request-login in
+                 ExtensionBar/LoginModal) — no second Log in tap on the
+                 Identity Verification box. -->
             <button class="nge-mw-cta" @click="emit('login')">
-              🔐 BECOME A CITIZEN SCIENTIST
+              🔐 LOG IN WITH GOOGLE
             </button>
-            <div class="nge-mw-cta-sub">Log in · free · full access</div>
+            <div class="nge-mw-cta-sub">Become a citizen scientist · free · full access</div>
           </template>
           <button v-else class="nge-mw-signed" @click="openPanel('profile')">
             ✓ CITIZEN SCIENTIST ON DUTY<template v-if="userName"> · {{ userName.toUpperCase() }}</template>
