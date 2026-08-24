@@ -275,9 +275,13 @@ function exploreWithoutLogin() {
   hideMobileWelcome();
   document.dispatchEvent(new CustomEvent('nge:dismiss-login'));
 }
-/** "Log in" on the sheet: close it and let the login box take the stage. */
+/** "Log in" on the sheet: close it and start auth right away. The dispatch
+ *  is synchronous, so LoginModal's window.open still runs inside this tap's
+ *  user gesture — the Google popup isn't blocked. If no auth prompt has
+ *  surfaced yet, LoginModal simply takes the stage as before. */
 function mobileWelcomeLogin() {
   hideMobileWelcome();
+  document.dispatchEvent(new CustomEvent('nge:request-login'));
 }
 function mobileOpenPanel(panel: 'cells' | 'chat' | 'profile' | 'leaderboard') {
   switch (panel) {
