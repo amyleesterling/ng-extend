@@ -50,6 +50,12 @@ function dismiss() {
   emit('hide');
 }
 
+// Portal social-proof line. Three candidate copies were wired as an A/B/C
+// test with Supabase conversion logging (commit 182be75; schema kept in
+// supabase-mobile-welcome-ab.sql) but traffic is too thin to test yet, so
+// the strongest line ships fixed — see TODO.md to revive the test.
+const PORTAL_LINE = 'People like you have mapped over 40,000 real neurons.';
+
 /* The 101 explainers are the existing connectome.quest mobile experiences. */
 function openLearn() {
   window.open('https://connectome.quest/learn.html', '_blank', 'noopener');
@@ -147,10 +153,7 @@ function shareEmail() {
                you stand with the login system, never a silent gap. -->
           <template v-if="!loggedIn">
             <div class="nge-mw-divider"><span>CITIZEN SCIENCE MOBILE PORTAL</span></div>
-            <p class="nge-mw-invite">
-              EyeWire II is charted by citizen scientists — players who trace
-              real neurons and help neuroscientists map the connectome.
-            </p>
+            <p class="nge-mw-invite">{{ PORTAL_LINE }}</p>
             <!-- Straight into the Google auth popup (via nge:request-login in
                  ExtensionBar/LoginModal) — no second Log in tap on the
                  Identity Verification box. -->
