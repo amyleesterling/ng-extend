@@ -21,8 +21,13 @@ import neuronIcon from '../../static/badges/pyr/neuron-icon-white.png';
  *  (tap Profile on the Guide to open the profile panel, etc.).
  *  userName: shown in the signed-in status row so the sheet always says
  *  where you stand — a hidden login button with no explanation reads as
- *  "login is missing" (Amy 2026-08-24). */
-defineProps<{ show: boolean, loggedIn: boolean, userName?: string }>();
+ *  "login is missing" (Amy 2026-08-24).
+ *  loginChecked: false until the first stored-token validation settles.
+ *  The check is async, so on load loggedIn is briefly false even for a
+ *  logged-in visitor; rendering the login button in that window makes it
+ *  appear and then vanish a second later (Amy 2026-08-24). Until checked,
+ *  the section shows a quiet verifying line instead of either state. */
+defineProps<{ show: boolean, loggedIn: boolean, loginChecked?: boolean, userName?: string }>();
 
 const emit = defineEmits<{
   (e: 'hide'): void;
@@ -150,8 +155,11 @@ function shareEmail() {
 
           <!-- Logged out: the mission invite IS the login path. Logged in:
                an explicit status row instead — the sheet always shows where
-               you stand with the login system, never a silent gap. -->
-          <template v-if="!loggedIn">
+               you stand with the login system, never a silent gap. Until
+               the token check settles, neither: a quiet verifying line, so
+               the login button never flashes in and then vanishes. -->
+          <div v-if="!loginChecked" class="nge-mw-verifying">VERIFYING CLEARANCE&hellip;</div>
+          <template v-else-if="!loggedIn">
             <div class="nge-mw-divider"><span>CITIZEN SCIENCE MOBILE PORTAL</span></div>
             <p class="nge-mw-invite">{{ PORTAL_LINE }}</p>
             <!-- Straight into the Google auth popup (via nge:request-login in
@@ -529,6 +537,29 @@ function shareEmail() {
   font-weight: 600;
   letter-spacing: 1.4px;
   color: rgba(143, 166, 204, 0.75);
+}
+
+/* Pre-check: quiet placeholder where the login section will land. Sized
+   like the signed-in row so the sheet doesn't jump when the check settles. */
+.nge-mw-verifying {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 11px;
+  padding: 11px;
+  border-radius: 9px;
+  border: 1px solid rgba(53, 181, 255, 0.18);
+  text-align: center;
+  color: rgba(143, 166, 204, 0.7);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 1.6px;
+  animation: nge-mw-verify-pulse 1.4s ease-in-out infinite;
+}
+@keyframes nge-mw-verify-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
 }
 
 /* Logged in: status row in the invite's place; tap opens the profile. */
