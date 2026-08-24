@@ -937,6 +937,7 @@ function activateTool(toolType: 'multicut' | 'merge' | 'findPath') {
     v-if="isMobileRef"
     :show="showMobileWelcome"
     :logged-in="validLogins.length > 0"
+    :login-checked="login.checked"
     :user-name="validLogins[0]?.name"
     @hide="exploreWithoutLogin"
     @login="mobileWelcomeLogin"
