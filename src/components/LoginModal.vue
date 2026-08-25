@@ -11,7 +11,7 @@
  * Handles multiple concurrent login prompts (e.g. two auth servers).
  */
 import { ref, onMounted, onUnmounted } from 'vue';
-import { openSegPanel } from '../widgets/widget_utils';
+import { openSegPanel, showDefaultCell } from '../widgets/widget_utils';
 import { defaultCredentialsManager } from 'neuroglancer/credentials_provider/default_manager';
 import { isMobileRef, mobileWelcomeOpenRef } from '../util/mobile';
 
@@ -221,7 +221,10 @@ function handleLoginSuccess() {
     // tab reads as a blank page (Amy 2026-08-24) — open the Cell
     // Library instead: pick a neuron, see it in 3D.
     if (isMobileRef.value) {
-      setTimeout(() => document.dispatchEvent(new CustomEvent('nge:open-cell-library')), 600);
+      // Show the showcase cell (config defaultSegments — the pinky
+      // neuron) so login lands on a cell in 3D, not a black screen
+      // (Amy 2026-08-24). Meshes need the fresh auth, hence post-login.
+      setTimeout(() => showDefaultCell(), 800);
     } else {
       setTimeout(() => openSegPanel(), 1500);
     }

@@ -24,3 +24,12 @@ too thin to measure yet (Amy, 2026-08-24). When there are enough visitors:
   3. People like you have become authors on real scientific publications.
 - Keep the numbers honest when reviving — refresh the neuron counts against
   real stats at that point.
+
+## Mobile onboarding tour
+
+Make a phone-sized version of the tutorial that shows new mobile users
+around the few things they can preview on a phone (Amy 2026-08-24): the
+showcase pinky cell in 3D, the Cell Library, chat, profile/badges, and
+the leaderboard. The desktop tutorials (store-pyr) drive viewer state
+the phone layout doesn't have, so this wants its own short flow — e.g.
+3–4 spotlight steps launched from the welcome sheet after first login.
