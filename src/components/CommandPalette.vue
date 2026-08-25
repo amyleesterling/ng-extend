@@ -16,6 +16,7 @@ import {
 } from '../store';
 import { setCellComplete } from '../widgets/lightbulb_service';
 import { EYEWIRE_II_CAVE_CONFIG } from '../config';
+import { CONNECTOME_QUEST_RESOURCES } from '../data/connectome-quest';
 
 const emit = defineEmits({
   'open-profile': null,
@@ -167,6 +168,16 @@ function buildActions(): PaletteItem[] {
     category: 'navigate',
     icon: '⚙',
     action: () => emit('open-settings'),
+  });
+  items.push({
+    id: 'tag-mode',
+    label: 'Scout Tag Mode',
+    description: 'Flag mergers and missing branches (Shift+T)',
+    category: 'tool',
+    icon: '⚑',
+    shortcut: 'Shift+T',
+    aliases: ['tag', 'scout', 'flag', 'merger', 'hairball', 'snip', 'extension'],
+    action: () => document.dispatchEvent(new CustomEvent('nge:toggle-tag-mode')),
   });
   items.push({
     id: 'open-dataset-selector',
@@ -343,6 +354,19 @@ function buildActions(): PaletteItem[] {
     aliases: ['forum', 'community', 'discuss', 'questions', 'ask'],
     action: () => window.open('https://forum.eyewire.org', '_blank'),
   });
+  // connectome.quest resources (shared catalog, also shown in the Help tab
+  // and the Nurro dock).
+  for (const res of CONNECTOME_QUEST_RESOURCES) {
+    items.push({
+      id: res.id,
+      label: res.label,
+      description: res.description,
+      category: 'help',
+      icon: res.icon,
+      aliases: res.aliases,
+      action: () => window.open(res.url, '_blank'),
+    });
+  }
 
   // ── Keyboard Shortcuts (dynamically from neuroglancer + curated labels) ──
   const FRIENDLY_NAMES: Record<string, { label: string; icon: string; aliases?: string[] }> = {

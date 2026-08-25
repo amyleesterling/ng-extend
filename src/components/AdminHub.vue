@@ -5,8 +5,131 @@ import {etNaiveToUtcIso, utcIsoToEtNaive, formatEt} from '../util/et_time';
 
 const backend = useProofreadingBackendStore();
 
-// Sub-tab: 'notifications' | 'groups' | 'badges'
-const adminSubTab = ref<'notifications' | 'groups' | 'badges'>('notifications');
+const props = defineProps<{ initialSubTab?: string }>();
+
+// Sub-tab: 'notifications' | 'groups' | 'badges' | 'triage'
+const adminSubTab = ref<'notifications' | 'groups' | 'badges' | 'triage'>(
+  props.initialSubTab === 'triage' || props.initialSubTab === 'groups' || props.initialSubTab === 'badges'
+    ? props.initialSubTab
+    : 'notifications');
+
+// ── Feedback triage ──────────────────────────────────────────────────────────
+// A scheduled agent reads incoming feedback (site_issues, client_errors) and
+// proposes an action per item into feedback_triage. This subtab is the human
+// gate: Amy or Celia approve, edit, or dismiss. Approving a 'message'
+// proposal sends it to the reporter as a notification; approving a spec just
+// marks it accepted for the work queue.
+interface TriageRow {
+  id: string;
+  source: string;
+  source_id: string;
+  source_excerpt: string | null;
+  recommendation: 'nothing' | 'message' | 'bug_fix_spec' | 'new_feature';
+  rationale: string | null;
+  proposed_message: string | null;
+  spec: string | null;
+  status: 'proposed' | 'approved' | 'dismissed' | 'done';
+  reviewed_by: string | null;
+  created_at: string;
+}
+const triageRows = ref<TriageRow[]>([]);
+const triageLoading = ref(false);
+const triageError = ref('');
+const triageShowReviewed = ref(false);
+const triageActing = ref<string | null>(null);
+/** Per-row edited message text, keyed by triage row id. */
+const triageEdits = ref<Record<string, string>>({});
+
+const TRIAGE_LABELS: Record<TriageRow['recommendation'], string> = {
+  nothing: 'No action',
+  message: 'Send a message',
+  bug_fix_spec: 'Bug fix spec',
+  new_feature: 'New feature',
+};
+
+/** Split a structured spec ("Symptom: ...\nWhere: ...") into labeled rows.
+ *  Lines that don't match the Label: form render as plain rows, so older
+ *  free-text specs still display. */
+function parseSpec(spec: string): { label: string | null; text: string }[] {
+  return spec.split('\n').map(l => l.trim()).filter(Boolean).map(line => {
+    const m = line.match(/^(Symptom|What|Where|Cause|Fix|Scope|Severity)\s*:\s*(.*)$/i);
+    return m ? { label: m[1], text: m[2] } : { label: null, text: line };
+  });
+}
+
+async function loadTriage() {
+  triageLoading.value = true;
+  triageError.value = '';
+  try {
+    const { supabase } = await import('../supabase');
+    let q = supabase.from('feedback_triage').select('*').order('created_at', { ascending: false }).limit(100);
+    if (!triageShowReviewed.value) q = q.eq('status', 'proposed');
+    const { data, error } = await q;
+    if (error) throw error;
+    triageRows.value = (data ?? []) as TriageRow[];
+    for (const r of triageRows.value) {
+      if (triageEdits.value[r.id] === undefined) {
+        triageEdits.value[r.id] = r.proposed_message ?? '';
+      }
+    }
+  } catch (e: any) {
+    triageError.value = e?.message ?? String(e);
+  } finally {
+    triageLoading.value = false;
+  }
+}
+
+// immediate: the triage deep-link mounts the hub already ON the triage tab,
+// so a change-only watch would never fire the initial load.
+watch(adminSubTab, t => { if (t === 'triage') loadTriage(); }, { immediate: true });
+watch(triageShowReviewed, () => loadTriage());
+
+async function setTriageStatus(row: TriageRow, status: 'approved' | 'dismissed' | 'done') {
+  if (triageActing.value) return;
+  triageActing.value = row.id;
+  try {
+    const { supabase } = await import('../supabase');
+
+    // Approving a message proposal sends the (possibly edited) message to the
+    // reporter as a notification, when we know who reported it.
+    if (status === 'approved' && row.recommendation === 'message') {
+      const text = (triageEdits.value[row.id] ?? row.proposed_message ?? '').trim();
+      if (text) {
+        let targetUserId: string | null = null;
+        if (row.source === 'site_issue') {
+          const { data } = await supabase.from('site_issues').select('user_id').eq('id', row.source_id).single();
+          targetUserId = data?.user_id ?? null;
+        }
+        // The reply arrives "from Nurro": guide avatar icon + a random real
+        // neuron render as the card image (admin-uploads/nurro-neurons).
+        const storageBase = 'https://javthknksdcrlhiaaptj.supabase.co/storage/v1/object/public/admin-uploads';
+        await supabase.from('notifications').insert({
+          title: '💬 Nurro replied to your feedback',
+          body: text,
+          thumbnail_url: `${storageBase}/nurro/guide-avatar.png`,
+          image_url: `${storageBase}/nurro-neurons/neuron-${1 + Math.floor(Math.random() * 24)}.jpg`,
+          target_type: targetUserId ? 'user' : 'all',
+          target_id: targetUserId,
+          send_at: new Date().toISOString(),
+          created_by: backend.userId,
+        });
+      }
+    }
+
+    const { error } = await supabase.from('feedback_triage').update({
+      status,
+      proposed_message: (triageEdits.value[row.id] ?? row.proposed_message) || null,
+      reviewed_by: backend.userName || backend.userEmail || 'admin',
+      reviewed_at: new Date().toISOString(),
+    }).eq('id', row.id);
+    if (error) throw error;
+    await loadTriage();
+  } catch (e: any) {
+    triageError.value = e?.message ?? String(e);
+  } finally {
+    triageActing.value = null;
+  }
+}
 
 // ── Notification form state ──
 const notifTitle = ref('');
@@ -59,9 +182,57 @@ function notifStage(n: any): 'scheduled' | 'active' | 'expired' {
   if (n.send_at && new Date(n.send_at).getTime() > now + 2_000) return 'scheduled';
   return 'active';
 }
-const scheduledNotifs = computed(() => backend.adminNotifications.filter(n => notifStage(n) === 'scheduled'));
-const activeNotifs    = computed(() => backend.adminNotifications.filter(n => notifStage(n) === 'active'));
-const expiredNotifs   = computed(() => backend.adminNotifications.filter(n => notifStage(n) === 'expired'));
+/**
+ * Categorize a notification so the list can be filtered. Most of the admin list
+ * is auto-generated noise (per-user badge awards, weekly recaps, help replies)
+ * that an admin rarely wants to manage; only broadcasts and weekly champions are
+ * on by default.
+ */
+function notifCategory(n: any): string {
+  const t = n.title || '';
+  if (t.includes('Weekly Champions')) return 'weeklyChampions';
+  if (t.includes('Week in Science')) return 'weeklyRecap';
+  if (t.includes('Response to your help request')) return 'helpResponse';
+  if (t === '✨ New Achievement!') return 'customBadge';         // admin-awarded special badge
+  if (t.includes('New Achievement')) return 'personalBadge';     // tutorial / building / exploration
+  return 'announcement';
+}
+
+const NOTIF_CATEGORIES: { key: string; label: string }[] = [
+  { key: 'announcement',    label: 'Announcements' },
+  { key: 'weeklyChampions', label: 'Weekly champions' },
+  { key: 'customBadge',     label: 'Custom badges' },
+  { key: 'personalBadge',   label: 'Personal badges' },
+  { key: 'weeklyRecap',     label: 'Weekly recaps' },
+  { key: 'helpResponse',    label: 'Help replies' },
+];
+const NOTIF_FILTER_KEY = 'nge-admin-notif-filters-v1';
+// Default ON: the admin's own broadcasts + the global weekly champions post.
+const DEFAULT_VISIBLE = ['announcement', 'weeklyChampions'];
+const visibleCategories = ref<Set<string>>(new Set(loadNotifFilters()));
+function loadNotifFilters(): string[] {
+  try {
+    const raw = localStorage.getItem(NOTIF_FILTER_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* fall through */ }
+  return DEFAULT_VISIBLE;
+}
+function toggleNotifCategory(key: string) {
+  const s = new Set(visibleCategories.value);
+  if (s.has(key)) s.delete(key); else s.add(key);
+  visibleCategories.value = s;
+  try { localStorage.setItem(NOTIF_FILTER_KEY, JSON.stringify([...s])); } catch { /* non-critical */ }
+}
+function isCategoryVisible(n: any): boolean {
+  return visibleCategories.value.has(notifCategory(n));
+}
+function categoryCount(key: string): number {
+  return backend.adminNotifications.filter((n: any) => notifCategory(n) === key).length;
+}
+
+const scheduledNotifs = computed(() => backend.adminNotifications.filter(n => notifStage(n) === 'scheduled' && isCategoryVisible(n)));
+const activeNotifs    = computed(() => backend.adminNotifications.filter(n => notifStage(n) === 'active'   && isCategoryVisible(n)));
+const expiredNotifs   = computed(() => backend.adminNotifications.filter(n => notifStage(n) === 'expired'  && isCategoryVisible(n)));
 
 /** Load an existing notification into the compose form for editing. */
 function startEdit(n: any) {
@@ -448,6 +619,7 @@ onMounted(() => {
       <button class="nge-admin-subtab" :class="{ 'nge-admin-subtab--active': adminSubTab === 'notifications' }" @click="adminSubTab = 'notifications'">Notifications</button>
       <button class="nge-admin-subtab" :class="{ 'nge-admin-subtab--active': adminSubTab === 'groups' }" @click="adminSubTab = 'groups'">Groups</button>
       <button class="nge-admin-subtab" :class="{ 'nge-admin-subtab--active': adminSubTab === 'badges' }" @click="adminSubTab = 'badges'">Special Badges</button>
+      <button class="nge-admin-subtab" :class="{ 'nge-admin-subtab--active': adminSubTab === 'triage' }" @click="adminSubTab = 'triage'">Triage</button>
     </div>
 
     <!-- ── Notifications ── -->
@@ -520,6 +692,23 @@ onMounted(() => {
         <div v-if="notifConfirm" class="nge-admin-confirm">
           ✓ {{ notifConfirm }}
           <button class="nge-admin-confirm-x" @click="notifConfirm = ''">×</button>
+        </div>
+      </div>
+
+      <!-- Category filters. Auto-generated notifications (per-user badges,
+           weekly recaps, help replies) are off by default so the list shows the
+           admin's own broadcasts + weekly champions; toggle a chip to reveal a
+           category. Persisted per browser. -->
+      <div class="nge-admin-block nge-admin-notif-filters">
+        <label class="nge-admin-label">Show</label>
+        <div class="nge-admin-filter-chips">
+          <button
+            v-for="cat in NOTIF_CATEGORIES"
+            :key="cat.key"
+            class="nge-admin-filter-chip"
+            :class="{ 'nge-admin-filter-chip--on': visibleCategories.has(cat.key) }"
+            @click="toggleNotifCategory(cat.key)"
+          >{{ cat.label }} <span class="nge-admin-filter-count">{{ categoryCount(cat.key) }}</span></button>
         </div>
       </div>
 
@@ -665,6 +854,63 @@ onMounted(() => {
               <option v-for="g in backend.groups" :key="g.id" :value="g.id">{{ g.name }}</option>
             </select>
             <button class="nge-admin-action-btn" :disabled="!awardGroupId" @click="awardToGroup">Award to Group</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TRIAGE (agent proposals awaiting human review) ═══ -->
+    <div v-if="adminSubTab === 'triage'" class="nge-admin-section">
+      <div class="nge-admin-block">
+        <div class="nge-triage-head">
+          <label class="nge-admin-label">Feedback Triage</label>
+          <label class="nge-triage-toggle">
+            <input type="checkbox" v-model="triageShowReviewed" />
+            <span>Show reviewed</span>
+          </label>
+          <button class="nge-admin-action-btn" @click="loadTriage" :disabled="triageLoading">↻ Refresh</button>
+        </div>
+        <div class="nge-admin-hint">
+          The triage agent reads every incoming report and proposes an action.
+          Nothing happens until you approve it here. Approving "Send a message"
+          delivers the text below to the reporter as a notification.
+        </div>
+        <div v-if="triageError" class="nge-admin-error">⚠ {{ triageError }}</div>
+        <div v-if="triageLoading && !triageRows.length" class="nge-admin-hint">Loading…</div>
+        <div v-else-if="!triageRows.length" class="nge-admin-hint">
+          No proposals waiting. The agent runs on a schedule; new feedback shows up here after its next pass.
+        </div>
+
+        <div v-for="row in triageRows" :key="row.id" class="nge-triage-card">
+          <div class="nge-triage-meta">
+            <span class="nge-triage-rec" :class="`nge-triage-rec--${row.recommendation}`">{{ TRIAGE_LABELS[row.recommendation] }}</span>
+            <span class="nge-triage-src">{{ row.source.replace('_', ' ') }}</span>
+            <span v-if="row.status !== 'proposed'" class="nge-triage-status">{{ row.status }}<template v-if="row.reviewed_by"> · {{ row.reviewed_by }}</template></span>
+          </div>
+          <div v-if="row.source_excerpt" class="nge-triage-excerpt">"{{ row.source_excerpt }}"</div>
+          <div v-if="row.rationale" class="nge-triage-rationale">{{ row.rationale }}</div>
+          <textarea
+            v-if="row.recommendation === 'message' && row.status === 'proposed'"
+            v-model="triageEdits[row.id]"
+            class="nge-triage-message"
+            rows="3"
+            @keydown.stop @keyup.stop @keypress.stop
+          ></textarea>
+          <div v-else-if="row.proposed_message" class="nge-triage-rationale">💬 {{ row.proposed_message }}</div>
+          <div v-if="row.spec" class="nge-triage-spec">
+            <div v-for="(line, i) in parseSpec(row.spec)" :key="i" class="nge-triage-spec-row">
+              <span v-if="line.label" class="nge-triage-spec-label">{{ line.label }}</span>
+              <span class="nge-triage-spec-text">{{ line.text }}</span>
+            </div>
+          </div>
+          <div v-if="row.status === 'proposed'" class="nge-triage-actions">
+            <button class="nge-admin-primary-btn" :disabled="triageActing === row.id" @click="setTriageStatus(row, 'approved')">
+              {{ row.recommendation === 'message' ? 'Approve + Send' : 'Approve' }}
+            </button>
+            <button class="nge-admin-action-btn" :disabled="triageActing === row.id" @click="setTriageStatus(row, 'dismissed')">Dismiss</button>
+          </div>
+          <div v-else-if="row.status === 'approved'" class="nge-triage-actions">
+            <button class="nge-admin-action-btn" :disabled="triageActing === row.id" @click="setTriageStatus(row, 'done')">Mark done</button>
           </div>
         </div>
       </div>
@@ -879,6 +1125,33 @@ onMounted(() => {
   opacity: 0.65;
 }
 
+.nge-admin-notif-filters { margin-bottom: 6px; }
+.nge-admin-filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.nge-admin-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  color: #8b93a7;
+  font-size: 0.82em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.nge-admin-filter-chip:hover { border-color: rgba(74, 158, 255, 0.4); color: #cfd6e6; }
+.nge-admin-filter-chip--on {
+  background: rgba(74, 158, 255, 0.16);
+  border-color: rgba(74, 158, 255, 0.5);
+  color: #e0ecff;
+}
+.nge-admin-filter-count {
+  font-size: 0.9em;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
 .nge-admin-edit-btn {
   background: none;
   border: none;
@@ -1058,15 +1331,17 @@ onMounted(() => {
 .nge-admin-notif-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
+  gap: 4px;
+  padding: 9px 10px;
   background: rgba(255, 255, 255, 0.03);
   border-radius: 4px;
   margin-bottom: 4px;
 }
-.nge-admin-notif-info { display: flex; flex-direction: column; gap: 2px; }
-.nge-admin-notif-info strong { font-size: 0.88em; color: #cde; font-weight: 600; }
-.nge-admin-notif-meta { font-size: 0.74em; color: #778; }
+/* flex:1 makes the info fill the row so the edit + delete buttons group at the
+   right edge instead of being spread out by space-between. */
+.nge-admin-notif-info { display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-width: 0; }
+.nge-admin-notif-info strong { font-size: 1em; color: #dbe6f5; font-weight: 600; }
+.nge-admin-notif-meta { font-size: 0.85em; color: #99a3ba; }
 
 .nge-admin-group-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .nge-admin-group-chip {
@@ -1125,6 +1400,51 @@ onMounted(() => {
 }
 
 .nge-admin-award-section { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+
+/* ── Triage ── */
+.nge-triage-head { display: flex; align-items: center; gap: 12px; }
+.nge-triage-head .nge-admin-label { flex: 1; }
+.nge-triage-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; color: rgba(255, 255, 255, 0.55); cursor: pointer;
+}
+.nge-triage-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.nge-triage-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nge-triage-rec {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em;
+  padding: 1px 8px; border-radius: 9px; text-transform: uppercase;
+}
+.nge-triage-rec--nothing      { background: rgba(255,255,255,0.08); color: #aab; }
+.nge-triage-rec--message      { background: rgba(100,200,255,0.14); color: #64c8ff; }
+.nge-triage-rec--bug_fix_spec { background: rgba(255,120,120,0.14); color: #f88; }
+.nge-triage-rec--new_feature  { background: rgba(160,255,160,0.12); color: #8e8; }
+.nge-triage-src { font-size: 11px; color: rgba(255,255,255,0.4); }
+.nge-triage-status { font-size: 11px; color: rgba(255,255,255,0.5); font-style: italic; }
+.nge-triage-excerpt { font-size: 12px; color: rgba(255,255,255,0.75); }
+.nge-triage-rationale { font-size: 11.5px; color: rgba(255,255,255,0.5); line-height: 1.4; }
+.nge-triage-message {
+  background: rgba(0,0,0,0.3); border: 1px solid rgba(100,200,255,0.2);
+  border-radius: 6px; color: #dde; font-size: 12px; padding: 7px 9px; resize: vertical;
+}
+.nge-triage-spec {
+  background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px; color: #ccd; font-size: 12px; padding: 9px 11px;
+  max-height: 240px; overflow-y: auto; margin: 0;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.nge-triage-spec-row { display: flex; gap: 8px; align-items: baseline; line-height: 1.45; }
+.nge-triage-spec-label {
+  flex: none; min-width: 62px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+  text-transform: uppercase; color: rgba(100, 200, 255, 0.75);
+}
+.nge-triage-spec-text { color: rgba(235, 238, 250, 0.88); }
+.nge-triage-actions { display: flex; gap: 8px; }
 
 .nge-admin-badge-grid {
   display: grid;

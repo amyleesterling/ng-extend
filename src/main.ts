@@ -1,6 +1,7 @@
 import {createApp, nextTick} from 'vue';
 import {createPinia} from 'pinia';
 import {installErrorReporting} from './util/error_reporting';
+import {installMobileMode, isMobileRef} from './util/mobile';
 
 import 'neuroglancer/ui/default_viewer.css';
 import './widgets/lightbulb_menu.css';
@@ -56,6 +57,16 @@ function mergeTopBars() {
   const ngTopBar = document.querySelector('.neuroglancer-viewer')!.children[0];
   const topBarVueParent = document.getElementById('insertNGTopBar')!;
   topBarVueParent.appendChild(ngTopBar);
+  // Two NG-native buttons live at the far right instead (Amy 2026-08-17):
+  // the ? help toggle, then the layer side panel toggle LAST so it hugs the
+  // panel it opens. Titles flip between Show/Hide, so match the suffix.
+  const farRight = document.getElementById('ngFarRight');
+  if (farRight) {
+    for (const suffix of ['help panel', 'layer side panel']) {
+      const btn = topBarVueParent.querySelector(`[title$="${suffix}"]`);
+      if (btn) farRight.appendChild(btn);
+    }
+  }
 }
 
 /* ── Pyr Favicon ── */
@@ -71,6 +82,9 @@ function injectNeuronFavicon() {
 
 window.addEventListener('DOMContentLoaded', () => {
   injectNeuronFavicon();
+  // Before mount: components read isMobileRef during setup (chat default,
+  // welcome sheet) and mobile.css keys off body.nge-mobile.
+  installMobileMode();
   const pinia = createPinia();
   const app = createApp(App);
   // Installed before mount so a failure during initial render is captured.
@@ -160,6 +174,9 @@ window.addEventListener('DOMContentLoaded', () => {
  * Retries a few times since layers may still be initializing.
  */
 function autoSelectSegLayer(viewer: any, attempt = 0) {
+  // Mobile: the seg side panel stays closed (Amy 2026-08-18), it would
+  // cover most of the screen. Users open it deliberately via its toggle.
+  if (isMobileRef.value) return;
   if (attempt > 5) return; // give up after ~10s
   setTimeout(() => {
     try {

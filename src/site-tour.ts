@@ -139,12 +139,12 @@ Your streak is shown next to your name on the leaderboard.`,
 
   // ── 7. Command palette ───────────────────────────────────────
   {
-    title: "Ask, and the Command Bar",
-    text: `Press **Ctrl+K** (**⌘K** on Mac), or click **Ask**, to *do something fast*.
+    title: "Nurro, and the Command Bar",
+    text: `Press **Ctrl+K** (**⌘K** on Mac), or click **AI**, to *do something fast*.
 
 Start typing and it fuzzy-searches every action, panel, and recently-viewed cell. Press **Enter** to run the highlighted one straight away, no waiting.
 
-Not a match? Ask a question in plain language instead and the Guide answers.`,
+Not a match? Ask a question in plain language instead and Nurro, your guide, answers.`,
     // Anchored to the Ask button: the old ⌘K chip was removed from the toolbar
     // and the palette it opened now lives inside this dock.
     position: { element: ".nge-ask-btn", side: "bottom", offset: { x: 0, y: 14 } },
@@ -274,8 +274,20 @@ Drag the panel anywhere on screen.`,
   {
     title: "Profile Settings",
     titleIcon: ICON_SETTINGS,
-    text: `Set your **flag emoji**, **bio**, **toolbar icons**, and (under **Advanced**) toggle viewer settings, edit raw JSON state, manage logged-in sessions, and more.`,
-    position: { element: '[title^="Profile Settings"]', side: "bottom", offset: { x: 0, y: 14 } },
+    text: `Settings live inside your **profile** now: set your **flag emoji**, **bio**, **toolbar icons**, and (under **Advanced**) toggle viewer settings, edit raw JSON state, manage logged-in sessions, and more.`,
+    position: { element: "#profileBtn", side: "bottom", offset: { x: 0, y: 14 } },
+    highlight: true,
+  },
+
+  // ── 16b. Scout Tag Mode ──────────────────────────────────────
+  {
+    title: "Scout Tag Mode",
+    text: `See something wrong that isn't your job right now? **Tag it.**
+
+Open **⚑ Tag Mode**, pick a type (✂️ Snip, 🧶 Hairball, 👯 Twins, 🗑 Debris, or 🌿 Extension), then **hold T and click** the spot in 2D or 3D. Scythes and Tracers jump to every open tag from **Cell Library, Tags** and fix them.
+
+You never have to fix what you find. Finding it is the contribution.`,
+    position: { element: '[data-icon-id="tags"]', side: "bottom", offset: { x: 0, y: 14 } },
     highlight: true,
   },
 
@@ -293,7 +305,7 @@ Click any user's name in chat or the leaderboard to open *their* profile.`,
 
   // ── 18. Hamburger menu ───────────────────────────────────────
   {
-    title: "☰ Tutorials & Help",
+    title: "📖 Tutorials & Help",
     text: `Three numbered tutorials — **Basics** (navigation), **Advanced Interface** (every panel), and **Cut & Merge** (proofreading operations) — plus links to the **Forum** and YouTube videos for each tool.`,
     position: { element: "#hamburger", side: "left", offset: { x: -10, y: 0 } },
     highlight: true,

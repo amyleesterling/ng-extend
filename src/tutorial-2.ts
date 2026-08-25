@@ -1,5 +1,6 @@
 import { Step } from "./store-pyr";
-import scytheHero from './images/scythe_hero.png';
+// 132KB web-sized JPEG; the 18MB source PNG stays out of the bundle.
+import scytheHero from './images/scythe_hero_web.jpg';
 import imgWheresNurro from './images/wheres-nurro.png';
 import imgNurroAtHome from './images/nurro-at-home600.png';
 import imgTutorialFinal from './images/ng-tutorial-final-image.png';
@@ -446,7 +447,7 @@ You can <a href="https://www.youtube.com/watch?v=vnAqH91EgNQ&list=PLZlCbXsRJFCw0
   //22
   {
     text: `
-Now you have a basic understanding of the EyeWire II interface! For additional training you can find more resources under the hamburger menu.`,
+Now you have a basic understanding of the EyeWire II interface! For additional training you can find more resources under the 📖 resources menu at the top right.`,
     position: {
       element: "#hamburger > button",
       side: "left",
@@ -456,7 +457,7 @@ Now you have a basic understanding of the EyeWire II interface! For additional t
   //23
   {
     text: `
-Check out <strong>Ask</strong> here! Press <strong>Ctrl+K</strong> (<strong>⌘K</strong> on Mac) to quickly search for tools, actions, and help resources, or just ask a question.`,
+Check out <strong>AI</strong> here! That's Nurro, your guide. Press <strong>Ctrl+K</strong> (<strong>⌘K</strong> on Mac) to quickly search for tools, actions, and help resources, or just ask a question.`,
     position: {
       // Was ".nge-cmd-trigger" — that chip was removed from the toolbar and the
       // palette now lives inside the Ask dock, so anchor to the Ask button.

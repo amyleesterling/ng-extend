@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import {
   useProofreadingBackendStore,
   useProofreadingQueueStore,
@@ -8,6 +8,9 @@ import {
   useHelpRequestStore,
   useUserStatsStore,
   useWorkingLinksStore,
+  useIssueTagStore,
+  isModelTag,
+  type IssueTag,
   type ProofreadingTask,
   type HelpRequest,
   type WorkingLink,
@@ -16,8 +19,16 @@ import {
 import { EYEWIRE_II_CAVE_CONFIG, getDatasetCaveConfig } from '../config';
 import { setCellComplete } from '../widgets/lightbulb_service';
 import { getAccessToken } from '../widgets/google_sheets_auth';
-import { findDatasetBySegName, switchToDataset, canonicalDataset, segLayerName, DATASETS, type DatasetEntry } from '../datasets';
+import { findDatasetBySegName, switchToDataset, canonicalDataset, segLayerName, currentSegLayerName, currentSegLayer, datasetDisplayName, DATASETS, SPECIES_ICONS, type DatasetEntry } from '../datasets';
+import { CONNECTOME_QUEST_RESOURCES } from '../data/connectome-quest';
+import scytheIcon from '../../static/tags/scythe-icon.png';
+import { scoutPinSvg } from '../data/toolbar-icons';
+
+const tagPinSvg = scoutPinSvg();
+import { runPanelTrace, flyPlusOne, runScytheSwing } from '../util/holo_trace';
+import tracerIcon from '../../static/tags/tracer-icon.png';
 import neuronIcon from '../../static/badges/pyr/neuron-icon-white.png';
+import { Uint64 } from 'neuroglancer/util/uint64';
 import ScreenshotDialog from './ScreenshotDialog.vue';
 
 const props = defineProps<{ initialTab?: string }>();
@@ -28,9 +39,88 @@ const login = useLoginStore();
 const history = useCellHistoryStore();
 const helpStore = useHelpRequestStore();
 const linksStore = useWorkingLinksStore();
+const tagStore = useIssueTagStore();
+
+// Particle trace on arrival (scifi-ui): the beam runs the panel boundary once.
+const panelEl = ref<HTMLElement | null>(null);
+onMounted(() => {
+  setTimeout(() => { if (panelEl.value) runPanelTrace(panelEl.value); }, 60);
+});
+
+/** Resolve a tag: the orbital itself is the hero (Amy). It winds up around
+ *  the button, two accelerating laps with the same behind-the-button
+ *  occlusion as its idle orbit, then catapults to the profile with the
+ *  existing comet. The store resolve waits for the catapult, because the
+ *  row unmounts the moment the tag leaves the open list. */
+const spinningTags = new Set<string>();
+function resolveTagFun(tag: IssueTag, e: MouseEvent) {
+  if (spinningTags.has(tag.id)) return;
+  // Grim salutes: resolving a Cut tag gets the scythe swing.
+  if (tag.tagType === 'merger') runScytheSwing(e.clientX, e.clientY, scytheIcon);
+  // The moment of glory (Amy).
+  tagSuccessToast.value = true;
+  if (tagToastTimer) clearTimeout(tagToastTimer);
+  tagToastTimer = setTimeout(() => { tagSuccessToast.value = false; }, 2100);
+  const wrap = (e.currentTarget as HTMLElement | null)?.closest?.('.nge-orbit-wrap') as HTMLElement | null;
+  const dot = wrap?.querySelector('.nge-orbit-dot') as HTMLElement | null;
+  if (!dot || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    flyPlusOne(e.clientX, e.clientY, '●', '53,181,255');
+    tagStore.resolve(tag.id);
+    return;
+  }
+  spinningTags.add(tag.id);
+  dot.style.animation = 'none';
+  const t0 = performance.now();
+  const SPIN = 640;
+  const step = (now: number) => {
+    const k = Math.min(1, (now - t0) / SPIN);
+    const a = k * k * 720; // ease-in wind-up, two laps
+    const behind = (a % 360) >= 180;
+    dot.style.transform = `rotate(${a}deg) translateX(19px) scale(${behind ? 0.75 : 1})`;
+    dot.style.zIndex = behind ? '0' : '2';
+    dot.style.opacity = behind ? '0.55' : '1';
+    if (k < 1) { requestAnimationFrame(step); return; }
+    const r = dot.getBoundingClientRect();
+    dot.style.visibility = 'hidden';
+    flyPlusOne(r.left + r.width / 2, r.top + r.height / 2, '●', '53,181,255');
+    spinningTags.delete(tag.id);
+    tagStore.resolve(tag.id);
+    setTimeout(() => {
+      dot.style.visibility = ''; dot.style.animation = '';
+      dot.style.transform = ''; dot.style.zIndex = ''; dot.style.opacity = '';
+    }, 400);
+  };
+  requestAnimationFrame(step);
+}
+/** One rotating mote at a time, relaying down the rows in sequence (Amy:
+ *  "have them one at a time in a sequence down the jump row of icons").
+ *  Each appearance is a fresh mount, so the orbit starts clean, does its
+ *  lap, and hands off to the next row. */
+const orbitSeq = ref(0);
+const orbitTimer = setInterval(() => { orbitSeq.value += 1; }, 2800);
+onBeforeUnmount(() => clearInterval(orbitTimer));
+function orbitOn(idx: number, len: number): boolean {
+  return len > 0 && orbitSeq.value % len === idx;
+}
+const tagSuccessToast = ref(false);
+let tagToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Deleting a tag is destructive for everyone, so the trashcan asks first:
+ *  first click arms the row's confirm, which auto-disarms after 4s. */
+const confirmDeleteTagId = ref<string | null>(null);
+let confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null;
+function askDeleteTag(tag: IssueTag) {
+  confirmDeleteTagId.value = tag.id;
+  if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer);
+  confirmDeleteTimer = setTimeout(() => { confirmDeleteTagId.value = null; }, 4000);
+}
+function confirmDeleteTag(tag: IssueTag) {
+  tagStore.remove(tag.id);
+  confirmDeleteTagId.value = null;
+}
 
 const loading = ref(false);
-const filter = ref<'mine' | 'all' | 'available' | 'completed' | 'claimed' | 'help' | 'links'>(
+const filter = ref<'mine' | 'all' | 'available' | 'completed' | 'claimed' | 'help' | 'links' | 'tags' | 'ai'>(
   (props.initialTab as any) || 'mine',
 );
 const search = ref('');
@@ -81,7 +171,7 @@ async function loadCellsForActiveDataset() {
 onMounted(async () => {
   loading.value = true;
   // Load tasks from Supabase — these have claim/completion status
-  await backend.loadTasks('eyewire_ii');
+  await backend.loadTasks();
   // Load the cell list for the active dataset (each dataset has its own sheet)
   await loadCellsForActiveDataset();
   loading.value = false;
@@ -326,7 +416,7 @@ async function claimCell(cell: typeof cells.value[0]) {
   }
   // Write claim to Google Sheet (best-effort)
   writeClaimToSheet(cell.segId, backend.userName);
-  await backend.loadTasks('eyewire_ii');
+  await backend.loadTasks();
 }
 
 /** Get current viewer position as a ClaimPoint. */
@@ -369,7 +459,7 @@ async function completeCell(cell: typeof cells.value[0]) {
   }
   // Notify UI that status changed (claim is already cleared by completeTask)
   document.dispatchEvent(new CustomEvent('nge:seg-status-changed', { detail: { segmentId: cell.segId, status: 'completed' } }));
-  await backend.loadTasks('eyewire_ii');
+  await backend.loadTasks();
   // Celebration!
   triggerCellCelebration();
 }
@@ -407,7 +497,7 @@ async function releaseCell(cell: typeof cells.value[0]) {
   }
   // Dispatch event so seg dot pips update
   document.dispatchEvent(new CustomEvent('nge:seg-status-changed', { detail: { segmentId: cell.segId, status: 'released' } }));
-  await backend.loadTasks('eyewire_ii');
+  await backend.loadTasks();
 }
 
 // ── Google Sheet write-back ──────────────────────────────────────────
@@ -708,7 +798,7 @@ async function saveCurrentAsLink() {
   const pos = getViewerPosition();
   const ds = activeDataset.value || getCurrentDatasetName();
   await linksStore.add({
-    title: `${ds || 'View'} — ${new Date().toLocaleString()}`,
+    title: `${ds || 'View'} · ${new Date().toLocaleString()}`,
     note: 'Saved before switching dataset',
     url,
     dataset: ds,
@@ -812,14 +902,9 @@ function getViewerPosition(): number[] {
 }
 
 function getCurrentDatasetName(): string {
-  try {
-    const viewer = (window as any)['viewer'];
-    for (const ml of viewer?.layerManager?.managedLayers ?? []) {
-      const typeName = ml.layer?.constructor?.name ?? '';
-      if (typeName.includes('Segmentation')) return ml.name ?? '';
-    }
-  } catch {}
-  return '';
+  // Shared with the Dataset button so both report the same on-screen dataset
+  // (visible, non-archived seg layer — see currentSegLayerName).
+  return currentSegLayerName();
 }
 
 async function submitNewHelp() {
@@ -864,6 +949,15 @@ const respondingTo = ref<string | null>(null);
 const responseNote = ref('');
 const responseUrl = ref('');
 const responseAnnotationLayer = ref('');
+const responseScreenshotUrl = ref('');
+const showResponseScreenshotDialog = ref(false);
+
+function onResponseScreenshotAttached(payload: { url: string }) {
+  responseScreenshotUrl.value = payload.url;
+}
+function clearResponseScreenshot() {
+  responseScreenshotUrl.value = '';
+}
 
 function toggleResponseForm(reqId: string) {
   if (respondingTo.value === reqId) {
@@ -873,6 +967,7 @@ function toggleResponseForm(reqId: string) {
     responseNote.value = '';
     responseUrl.value = '';
     responseAnnotationLayer.value = '';
+    responseScreenshotUrl.value = '';
   }
 }
 
@@ -888,28 +983,20 @@ function getAnnotationLayers(): string[] {
 }
 
 async function submitResponse(req: HelpRequest, andResolve = false) {
-  if (!responseNote.value.trim()) return;
-  const payload = {
-    note: responseNote.value.trim(),
+  // A reply needs at least a note or a screenshot.
+  if (!responseNote.value.trim() && !responseScreenshotUrl.value) return;
+  // Each reply is its own row in help_responses, so its url / annotation layer /
+  // screenshot accumulate instead of overwriting earlier replies.
+  await helpStore.addResponse(req.id, {
+    note: responseNote.value.trim() || undefined,
     url: responseUrl.value.trim() || undefined,
     annotationLayer: responseAnnotationLayer.value.trim() || undefined,
-    appendToExisting: !!req.responseNote,  // signal to append, not replace
-  };
-  if (andResolve) {
-    await helpStore.resolve(req.id, payload);
-  } else {
-    await helpStore.respond(req.id, payload);
-  }
+    screenshotUrl: responseScreenshotUrl.value || undefined,
+    resolve: andResolve,
+  });
   respondingTo.value = null;
+  responseScreenshotUrl.value = '';
   helpStore.refreshPending();
-}
-
-/** Format a threaded response note into HTML with line breaks */
-function formatResponseThread(note: string): string {
-  return note
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\n---\n/g, '<hr style="border:0;border-top:1px solid rgba(255,255,255,0.1);margin:6px 0">')
-    .replace(/\n/g, '<br>');
 }
 
 function relativeTime(iso: string): string {
@@ -933,6 +1020,190 @@ function jumpToReq(req: HelpRequest) {
   }
   activeHelpId.value = req.id;
   history.jumpToCell(req.segId, req.position);
+}
+
+// ── Scout tags (Tags tab) ────────────────────────────────────────────
+const showResolvedTags = ref(false);
+const openTagsSorted = computed(() => tagStore.openTags);
+const resolvedTags = computed(() => tagStore.tags.filter((t: IssueTag) =>
+  t.status === 'resolved' && !isModelTag(t) && (showAllDatasetTags.value || !isCrossDatasetTag(t))));
+
+function isCrossDatasetTag(tag: IssueTag): boolean {
+  if (!activeDataset.value) return false;
+  // Strict: a tag with no dataset stamp (legacy rows) is NOT assumed to be
+  // everywhere; it only appears under the All datasets toggle. Unstamped
+  // tags were leaking into every dataset's list (Amy, 2026-08-17).
+  if (!tag.dataset) return true;
+  return canonicalDataset(tag.dataset) !== canonicalDataset(activeDataset.value);
+}
+
+
+/** Pull the view to inspection zoom after a tag jump (Amy: "tag should
+ *  zoom me in closer, default is far away"). Only ever zooms IN: someone
+ *  already working close stays where they are. Targets sit near the
+ *  dataset landing defaults (stroeh 3/15000, minnie 5/30000). */
+function zoomToTagLevel() {
+  try {
+    const v: any = (window as any)['viewer'];
+    if (v?.crossSectionScale && v.crossSectionScale.value > 5) v.crossSectionScale.value = 4;
+    const proj = v?.perspectiveNavigationState?.zoomFactor;
+    if (proj && proj.value > 25000) proj.value = 18000;
+  } catch {}
+}
+
+function jumpToTag(tag: IssueTag) {
+  if (isCrossDatasetTag(tag)) return; // button is disabled; belt and braces
+  if (tag.segId) {
+    history.jumpToCell(tag.segId, tag.position as [number, number, number]);
+    zoomToTagLevel();
+    return;
+  }
+  // Position-only tag: move the crosshair directly.
+  try {
+    const v: any = (window as any)['viewer'];
+    if (v?.navigationState?.position && tag.position?.length === 3) {
+      v.navigationState.position.value = Float32Array.from(tag.position);
+    }
+  } catch {}
+  zoomToTagLevel();
+}
+
+const TAG_TYPE_META: Record<string, { label: string; pip: string }> = {
+  merger: { label: 'Cut', pip: '#e06060' },
+  missing_branch: { label: 'Extend', pip: '#60c060' },
+  other: { label: 'Other', pip: '#f5d142' },
+};
+const TAG_SUBTYPE_LABELS: Record<string, string> = {
+  snip: '✂️ Snip', hairball: '🧶 Hairball', twins: '👯 Twins', debris: '🗑 Debris',
+};
+function tagLabel(tag: IssueTag): string {
+  if (tag.subtype && TAG_SUBTYPE_LABELS[tag.subtype]) return TAG_SUBTYPE_LABELS[tag.subtype];
+  return TAG_TYPE_META[tag.tagType]?.label ?? tag.tagType;
+}
+/** Tags scope to the current dataset like every other Cell Library list;
+ *  the globe chip widens to all datasets. */
+const showAllDatasetTags = ref(false);
+/** Human tags only; model candidates live in the AI tab. */
+const humanOpenTags = computed(() => tagStore.openTags.filter((t: IssueTag) => !isModelTag(t)));
+const datasetTags = computed(() =>
+  showAllDatasetTags.value ? humanOpenTags.value : humanOpenTags.value.filter((t: IssueTag) => !isCrossDatasetTag(t)));
+/** Lane filter: Scythes work mergers, Tracers work extensions. */
+const tagLane = ref<'all' | 'merger' | 'missing_branch'>('all');
+const laneFilteredTags = computed(() =>
+  tagLane.value === 'all' ? datasetTags.value : datasetTags.value.filter((t: IssueTag) => t.tagType === tagLane.value));
+
+// ── AI candidates (AI tab) ───────────────────────────────────────────
+// Model-seeded merger candidates, sorted hottest first. Rows reuse the
+// scout-tag row chrome; resolve/delete go through the same store.
+const aiOpenTags = computed(() => tagStore.openTags.filter((t: IssueTag) => isModelTag(t)));
+const aiDatasetTags = computed(() => aiOpenTags.value.filter((t: IssueTag) => !isCrossDatasetTag(t)));
+const aiResolvedTags = computed(() => tagStore.tags.filter((t: IssueTag) => t.status === 'resolved' && isModelTag(t)));
+const showResolvedAiTags = ref(false);
+
+/** Candidates clustered by cell (Amy: errors should group per neuron).
+ *  Groups sort biggest first; rows inside sort hottest first. */
+const aiGroups = computed(() => {
+  const by = new Map<string, IssueTag[]>();
+  for (const t of aiDatasetTags.value) {
+    const k = t.segId ?? 'unknown';
+    if (!by.has(k)) by.set(k, []);
+    by.get(k)!.push(t);
+  }
+  const groups = [...by.entries()].map(([root, tags]) => ({
+    root,
+    tags: [...tags].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)),
+  }));
+  groups.sort((a, b) => b.tags.length - a.tags.length);
+  return groups;
+});
+/** Expanded cells; every group starts open on the first load. */
+const aiExpandedRoots = ref<Set<string>>(new Set());
+let aiExpandSeeded = false;
+watch(aiGroups, gs => {
+  if (!aiExpandSeeded && gs.length) {
+    aiExpandedRoots.value = new Set(gs.map(g => g.root));
+    aiExpandSeeded = true;
+  }
+}, { immediate: true });
+function aiGroupExpanded(root: string): boolean {
+  return aiExpandedRoots.value.has(root);
+}
+function toggleAiGroup(root: string) {
+  const next = new Set(aiExpandedRoots.value);
+  if (next.has(root)) next.delete(root); else next.add(root);
+  aiExpandedRoots.value = next;
+}
+
+/** Badge color matching the marker shader's ramp: cool blue rising to
+ *  golden yellow (Amy's palette; orange is banned). */
+function confColor(conf?: number): string {
+  const c = Math.max(0, Math.min(1, ((conf ?? 1) - 0.2) / 0.8));
+  const ch = (a: number, b: number) => Math.round((a + (b - a) * c) * 255);
+  return `rgb(${ch(0.35, 1.0)}, ${ch(0.65, 0.84)}, ${ch(1.0, 0.15)})`;
+}
+
+/** Category icon slot. The model does not emit categories yet; when it
+ *  does (modelData.category), or when a human re-types the candidate
+ *  (subtype), the icon follows. */
+function aiCategoryIcon(tag: IssueTag): string {
+  const cat = tag.modelData?.category ?? tag.subtype;
+  const icons: Record<string, string> = { snip: '✂️', hairball: '🧶', twins: '👯', debris: '🗑' };
+  return (cat && icons[cat]) || '🤖';
+}
+
+/** Other datasets holding open AI candidates, for the empty state's
+ *  one-click switch (the demo batches are minnie65 only, so a user on the
+ *  retina would otherwise find a bare tab and no pointer onward). */
+const aiElsewhere = computed(() => {
+  const byCanon = new Map<string, number>();
+  for (const t of aiOpenTags.value) {
+    if (!t.dataset || !isCrossDatasetTag(t)) continue;
+    const c = canonicalDataset(t.dataset);
+    byCanon.set(c, (byCanon.get(c) ?? 0) + 1);
+  }
+  const out: { ds: DatasetEntry; count: number }[] = [];
+  for (const [canon, count] of byCanon) {
+    const ds = findDatasetBySegName(canon);
+    if (ds) out.push({ ds, count });
+  }
+  return out;
+});
+
+async function switchToAiDataset(ds: DatasetEntry) {
+  const ok = await switchToDataset(ds);
+  if (ok) {
+    activeDataset.value = ds.layers.find((l: any) => l.type === 'segmentation')?.name ?? '';
+  }
+}
+
+/** Make the candidate's root visible in the first segmentation layer.
+ *  Retried on a schedule: the first attempt can be eaten by the middleauth
+ *  login popup the graphene layer triggers on a cold jump. */
+function ensureSegVisible(segId: string) {
+  const attempt = () => {
+    try {
+      // The ACTIVE seg layer: the first-seg-layer heuristic used to add the
+      // root to the archived layer left behind by a dataset switch.
+      const segLayer = currentSegLayer();
+      const groupState = segLayer?.layer?.displayState?.segmentationGroupState?.value;
+      if (groupState?.visibleSegments) {
+        const seg = Uint64.parseString(segId);
+        if (!groupState.visibleSegments.has(seg)) groupState.visibleSegments.add(seg);
+      }
+    } catch {}
+  };
+  attempt();
+  for (const ms of [1500, 4000, 9000]) setTimeout(attempt, ms);
+}
+
+/** Jump to the candidate and bring up its proposed-split constellation. */
+function jumpToAiTag(tag: IssueTag) {
+  if (isCrossDatasetTag(tag)) return;
+  jumpToTag(tag);
+  if (tag.segId) ensureSegVisible(tag.segId);
+  if (tag.modelData?.posRelUm?.length && tagStore.activeSplitTagId !== tag.id) {
+    tagStore.toggleSplitOverlay(tag);
+  }
 }
 
 function resolveReq(req: HelpRequest) {
@@ -1015,7 +1286,7 @@ async function submitNewLink() {
   const url = window.location.href;
   const pos = getViewerPosition();
   const id = await linksStore.add({
-    title: newLinkTitle.value.trim() || `${getCurrentDatasetName() || 'View'} — ${new Date().toLocaleString()}`,
+    title: newLinkTitle.value.trim() || `${getCurrentDatasetName() || 'View'} · ${new Date().toLocaleString()}`,
     note: newLinkNote.value.trim(),
     url,
     dataset: getCurrentDatasetName(),
@@ -1042,9 +1313,48 @@ async function commitRename(link: WorkingLink) {
   renamingLinkId.value = null;
 }
 
+/** Parse the state JSON out of a saved link's URL hash, if any. */
+function linkHashState(link: WorkingLink): any | null {
+  try {
+    const h = new URL(link.url, window.location.href).hash;
+    if (!h.startsWith('#!')) return null;
+    return JSON.parse(decodeURIComponent(h.slice(2)));
+  } catch { return null; }
+}
+
+/** Stale link rescue: rebuild the view from the structured fields saved
+ *  alongside the URL (dataset, position, segments) instead of trusting a
+ *  hash that no longer describes a working state. */
+async function openLinkStructured(link: WorkingLink, targetDs: any) {
+  if (targetDs && link.dataset && link.dataset !== activeDataset.value) {
+    const ok = await switchToDataset(targetDs);
+    if (ok) activeDataset.value = link.dataset;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  const seg = link.visibleSegments?.[0] ?? '';
+  const pos = link.position && link.position.length === 3 ? link.position : undefined;
+  if (seg || pos) history.jumpToCell(seg, pos as any);
+}
+
 function openLink(link: WorkingLink) {
-  // Same dataset → cross-dataset behavior matches help-request flow.
+  // Old links can carry a stale origin from an earlier deployment; keep the
+  // saved state but always stay on this app.
+  let linkUrl = link.url;
+  try {
+    const u = new URL(link.url, window.location.href);
+    linkUrl = window.location.origin + u.pathname + u.search + u.hash;
+  } catch {}
+  // A link whose hash is missing, unparseable, or has no segmentation layer
+  // is stale (Amy: an old saved link opened the wrong dataset). Fall back to
+  // the structured restore rather than loading a broken state.
+  const state = linkHashState(link);
+  const hasSeg = ((state?.layers ?? []) as any[]).some(
+    l => typeof l?.type === 'string' && l.type.startsWith('segmentation'));
   const targetDs = link.dataset && findDatasetBySegName(link.dataset);
+  if (link.dataset && (!state || !hasSeg)) {
+    void openLinkStructured(link, targetDs || null);
+    return;
+  }
   const current = activeDataset.value;
   if (link.dataset && current && link.dataset !== current && targetDs) {
     // Reuse the cross-dataset confirmation pattern (synthesize a HelpRequest-shaped object).
@@ -1061,11 +1371,11 @@ function openLink(link: WorkingLink) {
     jumpConfirmTargetDs.value = targetDs;
     jumpConfirmCopied.value = false;
     // Override: continue should navigate via the URL itself, not just the segment.
-    pendingLinkOpen.value = link;
+    pendingLinkOpen.value = { ...link, url: linkUrl };
     return;
   }
   // Same dataset: open URL directly (replaces current state)
-  window.location.href = link.url;
+  window.location.href = linkUrl;
 }
 
 const pendingLinkOpen = ref<WorkingLink | null>(null);
@@ -1093,7 +1403,21 @@ function relativeTimeShort(iso: string): string {
 // ── Drag ─────────────────────────────────────────────────────────────
 const isDragging = ref(false);
 const dragOffset = ref({ x: 0, y: 0 });
-const panelPos = ref({ x: window.innerWidth / 2 - 220, y: 80 });
+// Position is persisted alongside size (Amy: "saving my resizing but not
+// placement"). The old off-screen worry is handled by clamping into the
+// CURRENT viewport on load instead of by refusing to save.
+const CL_POS_KEY = 'nge_cell_library_pos_v1';
+const panelPos = ref((() => {
+  const fallback = { x: window.innerWidth / 2 - 220, y: 80 };
+  try {
+    const saved = JSON.parse(localStorage.getItem(CL_POS_KEY) || 'null');
+    if (!saved || !Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return fallback;
+    return {
+      x: Math.max(-200, Math.min(saved.x, window.innerWidth - 120)),
+      y: Math.max(40, Math.min(saved.y, window.innerHeight - 80)),
+    };
+  } catch { return fallback; }
+})());
 
 function startDrag(e: MouseEvent) {
   isDragging.value = true;
@@ -1101,9 +1425,51 @@ function startDrag(e: MouseEvent) {
   const move = (ev: MouseEvent) => {
     panelPos.value = { x: ev.clientX - dragOffset.value.x, y: ev.clientY - dragOffset.value.y };
   };
-  const up = () => { isDragging.value = false; window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+  const up = () => {
+    isDragging.value = false;
+    window.removeEventListener('mousemove', move);
+    window.removeEventListener('mouseup', up);
+    try { localStorage.setItem(CL_POS_KEY, JSON.stringify(panelPos.value)); } catch { /* ignore */ }
+  };
   window.addEventListener('mousemove', move);
   window.addEventListener('mouseup', up);
+}
+
+// ── Tab visibility (the hub was getting crowded) ─────────────────────
+// Users hide the tabs they never use from the panel's own little settings
+// popover. The active tab and deep-link targets always render.
+const CL_TABS_KEY = 'nge_cell_library_tabs_v1';
+const ALL_CL_TABS: { key: string; label: string }[] = [
+  { key: 'mine',      label: 'My Cells' },
+  { key: 'available', label: 'Available' },
+  { key: 'claimed',   label: 'Claimed' },
+  { key: 'all',       label: 'All' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'help',      label: 'Help' },
+  { key: 'tags',      label: 'Tags' },
+  { key: 'ai',        label: 'AI' },
+  { key: 'links',     label: 'My Saved Links' },
+];
+/** Hidden by default (still in the gear picker): the tab bar was cropping
+ *  at 9 tabs, and Completed is the least-visited (Amy 2026-08-17). */
+const DEFAULT_HIDDEN_CL_TABS = ['completed'];
+const visibleTabs = ref<string[]>((() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CL_TABS_KEY) || 'null');
+    if (Array.isArray(saved) && saved.length) return saved;
+  } catch {}
+  return ALL_CL_TABS.map(t => t.key).filter(k => !DEFAULT_HIDDEN_CL_TABS.includes(k));
+})());
+const showTabSettings = ref(false);
+function toggleTab(key: string) {
+  const set = new Set(visibleTabs.value);
+  if (set.has(key)) { if (set.size > 1) set.delete(key); } // never hide the last one
+  else set.add(key);
+  visibleTabs.value = ALL_CL_TABS.map(t => t.key).filter(k => set.has(k));
+  try { localStorage.setItem(CL_TABS_KEY, JSON.stringify(visibleTabs.value)); } catch {}
+}
+function tabShown(key: string): boolean {
+  return visibleTabs.value.includes(key) || filter.value === (key as any);
 }
 
 // ── Resize ───────────────────────────────────────────────────────────
@@ -1186,43 +1552,68 @@ const panelStyle = computed(() => ({
 <template>
   <Teleport to="body">
     <Transition name="nge-cl" appear>
-      <div class="nge-cl-panel" :style="panelStyle">
+      <div ref="panelEl" class="nge-cl-panel" :style="panelStyle">
 
         <!-- Top bar -->
         <div class="nge-cl-topbar" @mousedown="startDrag" :class="{ 'nge-cl-dragging': isDragging }">
           <div class="nge-cl-title">
-            <img :src="neuronIcon" class="nge-cl-icon" /> Cell Library
+            <img :src="neuronIcon" class="nge-cl-icon" /> CELL LIBRARY
           </div>
-          <button class="nge-cl-close" @click="emit('hide')">×</button>
+          <button class="nge-cl-gear" title="Choose which tabs show" @mousedown.stop @click="showTabSettings = !showTabSettings">⚙</button>
+          <button class="nge-cl-close" @mousedown.stop @click="emit('hide')">×</button>
+        </div>
+
+        <!-- Resolve celebration -->
+        <Transition name="nge-cl-tagwin">
+          <div v-if="tagSuccessToast" class="nge-cl-tagwin" @click="tagSuccessToast = false">
+            <div class="nge-cl-tagwin-glyph" v-html="tagPinSvg"></div>
+            <div class="nge-cl-tagwin-title">Success!</div>
+            <div class="nge-cl-tagwin-sub">You solved the tagged tangle!</div>
+          </div>
+        </Transition>
+
+        <!-- Per-user tab picker -->
+        <div v-if="showTabSettings" class="nge-cl-tabsettings" @mousedown.stop>
+          <div class="nge-cl-tabsettings-title">Tabs on this panel</div>
+          <label v-for="t in ALL_CL_TABS" :key="t.key" class="nge-cl-tabsettings-row">
+            <input type="checkbox" :checked="visibleTabs.includes(t.key)" @change="toggleTab(t.key)" />
+            <span>{{ t.label }}</span>
+          </label>
         </div>
 
         <!-- Filter tabs -->
         <div class="nge-cl-filters">
-          <button :class="{ active: filter === 'mine' }" @click="filter = 'mine'">
+          <button v-if="tabShown('mine')" :class="{ active: filter === 'mine' }" @click="filter = 'mine'">
             My Cells ({{ myClaimCount }})
           </button>
-          <button :class="{ active: filter === 'available' }" @click="filter = 'available'">
+          <button v-if="tabShown('available')" :class="{ active: filter === 'available' }" @click="filter = 'available'">
             Available ({{ availableCount }})
           </button>
-          <button :class="{ active: filter === 'claimed', 'nge-cl-claimed-tab': true }" @click="filter = 'claimed'">
+          <button v-if="tabShown('claimed')" :class="{ active: filter === 'claimed', 'nge-cl-claimed-tab': true }" @click="filter = 'claimed'">
             Claimed ({{ claimedCount }})
           </button>
-          <button :class="{ active: filter === 'all' }" @click="filter = 'all'">
+          <button v-if="tabShown('all')" :class="{ active: filter === 'all' }" @click="filter = 'all'">
             All ({{ datasetScopedCells.length }})
           </button>
-          <button :class="{ active: filter === 'completed' }" @click="filter = 'completed'">
+          <button v-if="tabShown('completed')" :class="{ active: filter === 'completed' }" @click="filter = 'completed'">
             Completed ({{ completedCount }})
           </button>
-          <button :class="{ active: filter === 'help', 'nge-cl-help-tab': true }" @click="filter = 'help'">
+          <button v-if="tabShown('help')" :class="{ active: filter === 'help', 'nge-cl-help-tab': true }" @click="filter = 'help'">
             Help ({{ pendingHelp.length }})
           </button>
-          <button :class="{ active: filter === 'links', 'nge-cl-links-tab': true }" @click="filter = 'links'">
+          <button v-if="tabShown('tags')" :class="{ active: filter === 'tags', 'nge-cl-tags-tab': true }" @click="filter = 'tags'">
+            Tags ({{ datasetTags.length }})
+          </button>
+          <button v-if="tabShown('ai')" :class="{ active: filter === 'ai', 'nge-cl-ai-tab': true }" @click="filter = 'ai'">
+            AI ({{ aiDatasetTags.length }})
+          </button>
+          <button v-if="tabShown('links')" :class="{ active: filter === 'links', 'nge-cl-links-tab': true }" @click="filter = 'links'">
             My Saved Links ({{ linksStore.links.length }})
           </button>
         </div>
 
         <!-- Search (not shown on Help / Links tabs) -->
-        <div v-if="filter !== 'help' && filter !== 'links'" class="nge-cl-search">
+        <div v-if="filter !== 'help' && filter !== 'links' && filter !== 'tags' && filter !== 'ai'" class="nge-cl-search">
           <input
             v-model="search"
             placeholder="Search by ID, name, or notes..."
@@ -1345,9 +1736,12 @@ const panelStyle = computed(() => ({
             class="nge-cl-help-ds-group"
             :class="{ 'nge-cl-help-ds-group--cross': !group.isCurrent }"
           >
-            <!-- Dataset section header (only when there's more than one group) -->
+            <!-- Dataset section header: shown with multiple groups, and ALSO
+                 for a lone non-current group. Without it, requests that all
+                 live in one other dataset auto-collapsed with no header to
+                 expand them: count said 2, list showed nothing (Amy). -->
             <div
-              v-if="hasMultipleHelpDatasets"
+              v-if="hasMultipleHelpDatasets || !group.isCurrent"
               class="nge-cl-help-ds-header"
               @click="toggleDatasetGroup(group.dataset)"
             >
@@ -1405,12 +1799,19 @@ const panelStyle = computed(() => ({
                   </div>
                 </div>
 
-            <!-- Show existing response thread -->
-            <div v-if="req.responseNote" class="nge-cl-response-display">
-              <div class="nge-cl-response-label">💬 {{ req.resolvedByName || 'Response' }}:</div>
-              <div class="nge-cl-response-text" v-html="formatResponseThread(req.responseNote)"></div>
-              <a v-if="req.responseUrl" class="nge-cl-response-link" @click.prevent="openResponseUrl(req.responseUrl)" href="#">↗ View linked state</a>
-              <span v-if="req.responseAnnotationLayer" class="nge-cl-response-layer">📐 Layer: {{ req.responseAnnotationLayer }}</span>
+            <!-- Reply thread: one entry per help_responses row (each keeps its
+                 own link / annotation layer / screenshot). -->
+            <div v-if="req.responses && req.responses.length" class="nge-cl-response-display">
+              <div v-for="resp in req.responses" :key="resp.id" class="nge-cl-response-item">
+                <div class="nge-cl-response-label">💬 {{ resp.userName || 'Response' }}<span v-if="resp.resolved"> · resolved</span>:</div>
+                <div v-if="resp.note" class="nge-cl-response-text">{{ resp.note }}</div>
+                <a v-if="resp.url" class="nge-cl-response-link" @click.prevent="openResponseUrl(resp.url)" href="#">↗ View linked state</a>
+                <span v-if="resp.annotationLayer" class="nge-cl-response-layer">📐 Layer: {{ resp.annotationLayer }}</span>
+                <a v-if="resp.screenshotUrl" :href="resp.screenshotUrl" target="_blank" rel="noopener"
+                   class="nge-cl-help-shot-thumb" title="Open full screenshot">
+                  <img :src="resp.screenshotUrl" alt="Reply screenshot" />
+                </a>
+              </div>
               <button v-if="respondingTo !== req.id" class="nge-cl-btn nge-cl-btn--reply" @click="toggleResponseForm(req.id)">↩ Reply</button>
             </div>
 
@@ -1441,14 +1842,26 @@ const panelStyle = computed(() => ({
                 <option value="">Select annotation layer (optional)</option>
                 <option v-for="layer in getAnnotationLayers()" :key="layer" :value="layer">{{ layer }}</option>
               </select>
+              <!-- Attach an (optionally annotated) screenshot to the reply,
+                   same flow as the initial request. -->
+              <button
+                v-if="!responseScreenshotUrl"
+                class="nge-cl-btn nge-cl-help-shot-btn"
+                @click="showResponseScreenshotDialog = true"
+                title="Attach a screenshot of the current view"
+              >📷 Attach screenshot</button>
+              <div v-else class="nge-cl-help-shot-preview">
+                <img :src="responseScreenshotUrl" alt="Reply screenshot" />
+                <button class="nge-cl-help-shot-remove" @click="clearResponseScreenshot" title="Remove screenshot">×</button>
+              </div>
               <button
                 class="nge-cl-btn nge-cl-btn--submit-response"
-                :disabled="!responseNote.trim()"
+                :disabled="!responseNote.trim() && !responseScreenshotUrl"
                 @click="submitResponse(req)"
               >Submit Response</button>
               <button
                 class="nge-cl-btn nge-cl-btn--submit-response nge-cl-btn--resolve"
-                :disabled="!responseNote.trim()"
+                :disabled="!responseNote.trim() && !responseScreenshotUrl"
                 @click="submitResponse(req, true)"
               >Submit & Resolve</button>
             </div>
@@ -1486,12 +1899,246 @@ const panelStyle = computed(() => ({
                   <button class="nge-cl-btn nge-cl-btn--release" @click="removeReq(req)" title="Remove">×</button>
                 </div>
               </div>
-              <!-- Response display -->
-              <div v-if="req.responseNote" class="nge-cl-response-display">
-                <div class="nge-cl-response-label">Response from {{ req.resolvedByName || 'resolver' }}:</div>
-                <div class="nge-cl-response-text">{{ req.responseNote }}</div>
-                <a v-if="req.responseUrl" class="nge-cl-response-link" @click.prevent="openResponseUrl(req.responseUrl)" href="#">↗ View linked state</a>
-                <span v-if="req.responseAnnotationLayer" class="nge-cl-response-layer">📐 Layer: {{ req.responseAnnotationLayer }}</span>
+              <!-- Response display: one entry per help_responses row -->
+              <div v-if="req.responses && req.responses.length" class="nge-cl-response-display">
+                <div v-for="resp in req.responses" :key="resp.id" class="nge-cl-response-item">
+                  <div class="nge-cl-response-label">{{ resp.userName || 'Response' }}<span v-if="resp.resolved"> · resolved</span>:</div>
+                  <div v-if="resp.note" class="nge-cl-response-text">{{ resp.note }}</div>
+                  <a v-if="resp.url" class="nge-cl-response-link" @click.prevent="openResponseUrl(resp.url)" href="#">↗ View linked state</a>
+                  <span v-if="resp.annotationLayer" class="nge-cl-response-layer">📐 Layer: {{ resp.annotationLayer }}</span>
+                  <a v-if="resp.screenshotUrl" :href="resp.screenshotUrl" target="_blank" rel="noopener"
+                     class="nge-cl-help-shot-thumb" title="Open full screenshot">
+                    <img :src="resp.screenshotUrl" alt="Reply screenshot" />
+                  </a>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- connectome.quest resources -->
+          <div class="nge-cl-quest">
+            <div class="nge-cl-quest-title">Learn more at connectome.quest</div>
+            <div class="nge-cl-quest-grid">
+              <a
+                v-for="res in CONNECTOME_QUEST_RESOURCES"
+                :key="res.id"
+                class="nge-cl-quest-link"
+                :href="res.url"
+                target="_blank"
+                rel="noopener"
+                :title="res.description"
+              >
+                <span class="nge-cl-quest-icon">{{ res.icon }}</span>
+                <span class="nge-cl-quest-label">{{ res.label }}</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ TAGS TAB (Scout tags: mergers / missing branches) ═══ -->
+        <div v-else-if="filter === 'tags'" class="nge-cl-list">
+          <div class="nge-cl-quest" style="margin-top: 0;">
+            <div class="nge-cl-quest-title"><span class="nge-cl-tag-pin" v-html="tagPinSvg"></span> Scout tags</div>
+            <div class="nge-cl-tags-hint">
+              Drop tags with the <span class="nge-cl-tag-pin" v-html="tagPinSvg"></span> Tag Mode toolbar button: center the crosshair
+              on a merger or a suspected missing branch and pick the type. Scythes
+              jump to each open tag from here, fix it, and mark it resolved.
+            </div>
+          </div>
+
+          <div class="nge-cl-tags-lanes">
+            <button :class="{ 'nge-cl-lane--active': tagLane === 'all' }" @click="tagLane = 'all'">All ({{ datasetTags.length }})</button>
+            <button :class="{ 'nge-cl-lane--active': tagLane === 'merger' }" @click="tagLane = 'merger'"><img :src="scytheIcon" class="nge-cl-lane-icon" alt="" /> For Scythes</button>
+            <button :class="{ 'nge-cl-lane--active': tagLane === 'missing_branch' }" @click="tagLane = 'missing_branch'"><img :src="tracerIcon" class="nge-cl-lane-icon" alt="" /> For Tracers</button>
+            <button
+              :class="{ 'nge-cl-lane--active': showAllDatasetTags }"
+              :title="showAllDatasetTags ? 'Showing every dataset' : 'Showing only ' + (datasetDisplayName(activeDataset) || 'this dataset')"
+              @click="showAllDatasetTags = !showAllDatasetTags"
+            >🌐 All datasets ({{ humanOpenTags.length }})</button>
+          </div>
+
+          <div v-if="!laneFilteredTags.length" class="nge-cl-tags-hint" style="padding: 10px 4px;">
+            No open tags in this lane. The volume is momentarily unsuspicious.
+          </div>
+
+          <div v-for="(tag, tagIdx) in laneFilteredTags" :key="tag.id" class="nge-cl-help-item">
+            <div class="nge-cl-row">
+              <div class="nge-cl-row-left">
+                <span class="nge-cl-pip" :style="{ background: TAG_TYPE_META[tag.tagType]?.pip ?? '#889' }"></span>
+                <div class="nge-cl-row-info">
+                  <div class="nge-cl-row-name">
+                    {{ tagLabel(tag) }}
+                    <span v-if="tag.segId" class="nge-cl-notes"> · seg …{{ tag.segId.slice(-6) }}</span>
+                  </div>
+                  <div class="nge-cl-row-meta">
+                    <span class="nge-cl-notes">{{ tag.position.join(', ') }}</span>
+                    <span v-if="isCrossDatasetTag(tag)" class="nge-cl-badge" style="background: rgba(245,209,66,0.12); color: #f5d142;">{{ datasetDisplayName(tag.dataset) }}</span>
+                    <span class="nge-cl-notes">{{ tag.userName || 'Anonymous' }} · {{ relativeTime(tag.createdAt) }}</span>
+                  </div>
+                  <div v-if="tag.note" class="nge-cl-notes" style="margin-top: 2px;">{{ tag.note }}</div>
+                  <div v-if="tag.annotationLayer" class="nge-cl-notes" style="margin-top: 2px;">📐 {{ tag.annotationLayer }}</div>
+                  <a v-if="tag.screenshotUrl" :href="tag.screenshotUrl" target="_blank" rel="noopener"
+                     class="nge-cl-help-shot-thumb" title="Open full screenshot">
+                    <img :src="tag.screenshotUrl" alt="Tag screenshot" />
+                  </a>
+                </div>
+              </div>
+              <div class="nge-cl-row-actions">
+                <button class="nge-cl-btn nge-cl-btn--jump" @click="jumpToTag(tag)"
+                        :disabled="isCrossDatasetTag(tag)"
+                        :title="isCrossDatasetTag(tag) ? 'Switch to ' + datasetDisplayName(tag.dataset) + ' first' : 'Jump to location'">↗</button>
+                <span class="nge-orbit-wrap"><span v-if="orbitOn(tagIdx, laneFilteredTags.length)" class="nge-orbit-dot" aria-hidden="true"></span><button class="nge-cl-btn nge-cl-btn--complete nge-cl-btn--tagdone" @click="resolveTagFun(tag, $event)" title="I fixed this! Claim the tag">✓</button></span>
+                <template v-if="confirmDeleteTagId === tag.id">
+                  <button class="nge-cl-btn nge-cl-btn--confirmdel" @click="confirmDeleteTag(tag)" title="Yes, delete this tag for everyone">Delete?</button>
+                  <button class="nge-cl-btn" @click="confirmDeleteTagId = null" title="Keep the tag">✕</button>
+                </template>
+                <button v-else class="nge-cl-btn nge-cl-btn--release" @click="askDeleteTag(tag)" title="Delete this tag for everyone (use ✓ if it was fixed)">🗑</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="nge-cl-help-resolved-toggle" @click="showResolvedTags = !showResolvedTags">
+            {{ showResolvedTags ? '▾' : '▸' }} Resolved ({{ resolvedTags.length }})
+          </div>
+          <template v-if="showResolvedTags">
+            <div v-for="tag in resolvedTags" :key="tag.id" class="nge-cl-help-item">
+              <div class="nge-cl-row nge-cl-row--done">
+                <div class="nge-cl-row-left">
+                  <span class="nge-cl-pip" style="background: #556;"></span>
+                  <div class="nge-cl-row-info">
+                    <div class="nge-cl-row-name">{{ tagLabel(tag) }}</div>
+                    <div class="nge-cl-row-meta">
+                      <span v-if="tag.resolvedByName" class="nge-cl-notes" style="color: #7f8;">✓ {{ tag.resolvedByName }}</span>
+                      <span class="nge-cl-notes">{{ relativeTime(tag.createdAt) }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="nge-cl-row-actions">
+                  <template v-if="confirmDeleteTagId === tag.id">
+                    <button class="nge-cl-btn nge-cl-btn--confirmdel" @click="confirmDeleteTag(tag)" title="Yes, delete this tag for everyone">Delete?</button>
+                    <button class="nge-cl-btn" @click="confirmDeleteTagId = null" title="Keep the tag">✕</button>
+                  </template>
+                  <button v-else class="nge-cl-btn nge-cl-btn--release" @click="askDeleteTag(tag)" title="Delete this tag for everyone">🗑</button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- ═══ AI TAB (model-detected merge-error candidates) ═══ -->
+        <div v-else-if="filter === 'ai'" class="nge-cl-list">
+          <div class="nge-cl-quest" style="margin-top: 0;">
+            <div class="nge-cl-quest-title">🤖 AI-predicted reconstruction errors</div>
+            <div class="nge-cl-ai-credit">from the Dorkenwald and Fuming model</div>
+            <div class="nge-cl-ai-scale">
+              <span class="nge-cl-ai-dot nge-cl-ai-dot--cool"></span>
+              <div class="nge-cl-ai-scale-bar"></div>
+              <span class="nge-cl-ai-dot nge-cl-ai-dot--hot"></span>
+            </div>
+            <div class="nge-cl-ai-scale-labels">
+              <span>less confident</span>
+              <span>more confident</span>
+            </div>
+            <div class="nge-cl-tags-hint" style="margin-top: 8px;">
+              Jump ↗ to a candidate to see the proposed split as a red and blue
+              point constellation, fix it, and mark it resolved.
+            </div>
+          </div>
+
+          <div class="nge-cl-tags-lanes">
+            <span class="nge-cl-notes" style="align-self: center;">{{ aiDatasetTags.length }} candidates on {{ aiGroups.length }} {{ aiGroups.length === 1 ? 'cell' : 'cells' }}</span>
+            <button :class="{ 'nge-cl-lane--active': tagStore.aiLayerOn }"
+                    :title="tagStore.aiLayerOn ? 'Hide AI candidate markers in the viewer' : 'Show AI candidate markers in the viewer'"
+                    @click="tagStore.setAiLayerOn(!tagStore.aiLayerOn)">📍 Markers</button>
+          </div>
+
+          <div v-if="!aiDatasetTags.length" class="nge-cl-tags-hint" style="padding: 10px 4px;">
+            No open AI candidates for this dataset.
+            <template v-if="!aiElsewhere.length"> The model finds no fault here.</template>
+          </div>
+          <div v-if="!aiDatasetTags.length && aiElsewhere.length" class="nge-cl-tags-lanes">
+            <button v-for="e in aiElsewhere" :key="e.ds.id"
+                    class="nge-cl-lane--active"
+                    :title="'Switch the viewer to ' + e.ds.label"
+                    @click="switchToAiDataset(e.ds)">
+              {{ SPECIES_ICONS[e.ds.species] }} Switch to {{ e.ds.shortLabel }} ({{ e.count }} candidates)
+            </button>
+          </div>
+
+          <template v-for="g in aiGroups" :key="g.root">
+            <div class="nge-cl-ai-group" @click="toggleAiGroup(g.root)"
+                 :title="aiGroupExpanded(g.root) ? 'Collapse this cell' : 'Expand this cell'">
+              <span class="nge-cl-ai-group-caret">{{ aiGroupExpanded(g.root) ? '▾' : '▸' }}</span>
+              <span class="nge-cl-ai-group-name">🧠 Cell …{{ g.root.slice(-6) }}</span>
+              <span class="nge-cl-notes">{{ g.tags.length }} {{ g.tags.length === 1 ? 'candidate' : 'candidates' }}</span>
+              <button class="nge-cl-ai-group-heat"
+                      :class="{ 'nge-cl-lane--active': tagStore.activeHeatRoots.includes(g.root) }"
+                      :disabled="tagStore.heatLoadingRoot === g.root"
+                      title="Heat layer: every window the model scored on this cell, cool to hot"
+                      @click.stop="tagStore.toggleHeatLayer(g.root)">
+                {{ tagStore.heatLoadingRoot === g.root ? '⏳' : '🔥' }} Heat
+              </button>
+            </div>
+          <div v-for="(tag, tagIdx) in g.tags" v-show="aiGroupExpanded(g.root)" :key="tag.id" class="nge-cl-help-item">
+            <div class="nge-cl-row">
+              <div class="nge-cl-row-left">
+                <span class="nge-cl-pip" :style="{ background: confColor(tag.confidence) }"></span>
+                <div class="nge-cl-row-info">
+                  <div class="nge-cl-row-name">
+                    {{ aiCategoryIcon(tag) }} Cut
+                    <span class="nge-cl-ai-conf" :style="{ color: confColor(tag.confidence) }">{{ Math.round((tag.confidence ?? 0) * 100) }}%</span>
+                    <span v-if="tag.segId" class="nge-cl-notes"> · seg …{{ tag.segId.slice(-6) }}</span>
+                  </div>
+                  <div class="nge-cl-row-meta">
+                    <span class="nge-cl-notes">{{ tag.position.join(', ') }}</span>
+                    <span v-if="isCrossDatasetTag(tag)" class="nge-cl-badge" style="background: rgba(245,209,66,0.12); color: #f5d142;">{{ datasetDisplayName(tag.dataset) }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="nge-cl-row-actions">
+                <button class="nge-cl-btn nge-cl-btn--jump" @click="jumpToAiTag(tag)"
+                        :disabled="isCrossDatasetTag(tag)"
+                        :title="isCrossDatasetTag(tag) ? 'Switch to ' + datasetDisplayName(tag.dataset) + ' first' : 'Jump to location and preview the proposed split'">↗</button>
+                <button class="nge-cl-btn nge-cl-btn--split"
+                        :class="{ 'nge-cl-btn--split-active': tagStore.activeSplitTagId === tag.id }"
+                        :disabled="!tag.modelData?.posRelUm?.length"
+                        title="Toggle the model's proposed split overlay"
+                        @click="tagStore.toggleSplitOverlay(tag)">✂</button>
+                <span class="nge-orbit-wrap"><span v-if="orbitOn(tagIdx, g.tags.length)" class="nge-orbit-dot" aria-hidden="true"></span><button class="nge-cl-btn nge-cl-btn--complete nge-cl-btn--tagdone" @click="resolveTagFun(tag, $event)" title="I fixed this! Claim the tag">✓</button></span>
+                <template v-if="confirmDeleteTagId === tag.id">
+                  <button class="nge-cl-btn nge-cl-btn--confirmdel" @click="confirmDeleteTag(tag)" title="Yes, delete this candidate for everyone">Delete?</button>
+                  <button class="nge-cl-btn" @click="confirmDeleteTagId = null" title="Keep the candidate">✕</button>
+                </template>
+                <button v-else class="nge-cl-btn nge-cl-btn--release" @click="askDeleteTag(tag)" title="Delete this candidate for everyone (use ✓ if it was fixed)">🗑</button>
+              </div>
+            </div>
+          </div>
+
+          </template>
+
+          <div class="nge-cl-help-resolved-toggle" @click="showResolvedAiTags = !showResolvedAiTags">
+            {{ showResolvedAiTags ? '▾' : '▸' }} Resolved ({{ aiResolvedTags.length }})
+          </div>
+          <template v-if="showResolvedAiTags">
+            <div v-for="tag in aiResolvedTags" :key="tag.id" class="nge-cl-help-item">
+              <div class="nge-cl-row nge-cl-row--done">
+                <div class="nge-cl-row-left">
+                  <span class="nge-cl-pip" style="background: #556;"></span>
+                  <div class="nge-cl-row-info">
+                    <div class="nge-cl-row-name">{{ aiCategoryIcon(tag) }} Cut · {{ Math.round((tag.confidence ?? 0) * 100) }}%</div>
+                    <div class="nge-cl-row-meta">
+                      <span v-if="tag.resolvedByName" class="nge-cl-notes" style="color: #7f8;">✓ {{ tag.resolvedByName }}</span>
+                      <span class="nge-cl-notes">{{ relativeTime(tag.createdAt) }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="nge-cl-row-actions">
+                  <template v-if="confirmDeleteTagId === tag.id">
+                    <button class="nge-cl-btn nge-cl-btn--confirmdel" @click="confirmDeleteTag(tag)" title="Yes, delete this candidate for everyone">Delete?</button>
+                    <button class="nge-cl-btn" @click="confirmDeleteTagId = null" title="Keep the candidate">✕</button>
+                  </template>
+                  <button v-else class="nge-cl-btn nge-cl-btn--release" @click="askDeleteTag(tag)" title="Delete this candidate for everyone">🗑</button>
+                </div>
               </div>
             </div>
           </template>
@@ -1764,6 +2411,12 @@ const panelStyle = computed(() => ({
     @close="showHelpScreenshotDialog = false"
     @attached="onHelpScreenshotAttached"
   />
+  <ScreenshotDialog
+    :show="showResponseScreenshotDialog"
+    mode="attach"
+    @close="showResponseScreenshotDialog = false"
+    @attached="onResponseScreenshotAttached"
+  />
 </template>
 
 <style scoped>
@@ -1779,6 +2432,9 @@ const panelStyle = computed(() => ({
   border-radius: 14px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
   font-family: 'SF Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+  /* Readable base so the panel's em-scaled text doesn't inherit a tiny size and
+     compound down (see the typography guideline in common.css). */
+  font-size: var(--nge-fs-base);
   color: #ccd;
   overflow: hidden;
 }
@@ -1815,10 +2471,136 @@ const panelStyle = computed(() => ({
   border-bottom: 1px solid rgba(120, 140, 255, 0.08);
 }
 .nge-cl-dragging { cursor: grabbing; }
+.nge-cl-lane-icon { width: 16px; height: 16px; vertical-align: -3px; margin-right: 2px; }
+/* ── "Success! You solved the tagged tangle!" celebration ── */
+.nge-cl-tagwin {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  text-align: center;
+  padding: 20px 30px;
+  border-radius: 14px;
+  background: rgba(5, 10, 22, 0.96);
+  border: 1px solid rgba(96, 224, 128, 0.5);
+  box-shadow: 0 0 30px rgba(96, 224, 128, 0.18), 0 12px 40px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+}
+.nge-cl-tagwin-glyph { font-size: 26px; margin-bottom: 6px; }
+.nge-cl-tagwin-glyph svg { width: 30px; height: 30px; filter: drop-shadow(0 0 8px rgba(96, 224, 128, 0.6)); }
+.nge-cl-tagwin-title {
+  font-family: 'Orbitron', 'Inter', sans-serif;
+  font-size: 16px; font-weight: 700; letter-spacing: 0.12em;
+  color: #a8f5c0;
+}
+.nge-cl-tagwin-sub { font-size: 12px; color: #cde; margin-top: 3px; }
+.nge-cl-tagwin-enter-active { transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+.nge-cl-tagwin-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.nge-cl-tagwin-enter-from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+.nge-cl-tagwin-leave-to { opacity: 0; transform: translate(-50%, -56%) scale(0.97); }
+
+/* ── The orbit: a mote circles the resolve button, ducking behind it on
+   the back half of each lap (z-index steps sell the occlusion), and on
+   resolve it flings to the profile. ── */
+.nge-orbit-wrap { position: relative; display: inline-flex; }
+.nge-orbit-wrap .nge-cl-btn {
+  position: relative;
+  z-index: 1;
+  /* Opaque face so the mote truly disappears behind it. */
+  background-color: #141830;
+}
+.nge-orbit-dot {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 4px; height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: #35b5ff;
+  box-shadow: 0 0 6px rgba(53, 181, 255, 0.85);
+  pointer-events: none;
+  animation: nge-orbit 2.8s linear infinite;
+}
+@keyframes nge-orbit {
+  0%    { transform: rotate(0deg)   translateX(19px) scale(1);    z-index: 2; opacity: 1; }
+  49.9% { transform: rotate(180deg) translateX(19px) scale(1);    z-index: 2; opacity: 1; }
+  50%   { transform: rotate(180deg) translateX(19px) scale(0.75); z-index: 0; opacity: 0.55; }
+  99.9% { transform: rotate(360deg) translateX(19px) scale(0.75); z-index: 0; opacity: 0.55; }
+  100%  { transform: rotate(360deg) translateX(19px) scale(1);    z-index: 2; opacity: 1; }
+}
+
+/* Armed delete confirm */
+.nge-cl-btn--confirmdel {
+  color: #ffb4b4 !important;
+  border-color: rgba(224, 96, 96, 0.65) !important;
+  background: rgba(224, 96, 96, 0.14) !important;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.nge-cl-tag-pin { display: inline-flex; vertical-align: -2px; }
+.nge-cl-tag-pin svg { filter: drop-shadow(0 0 4px rgba(53, 181, 255, 0.5)); }
+
+/* Materialize on open, ported from scifi-ui hologram.css (holodialog):
+   arrives blurred, overbright, slightly too large, settles through a soft
+   overshoot at 60 per cent. Replaces the old fade transition. */
+.nge-cl-panel {
+  animation: nge-cl-materialize 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes nge-cl-materialize {
+  0%   { opacity: 0; transform: scale(1.04) translateY(-10px);
+         filter: blur(20px) brightness(3); }
+  30%  { opacity: 0.6; filter: blur(3px) brightness(1.5); }
+  60%  { opacity: 1; transform: scale(0.99); filter: blur(0) brightness(1.1); }
+  100% { opacity: 1; transform: scale(1) translateY(0);
+         filter: blur(0) brightness(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nge-cl-panel { animation: none; }
+}
+
+.nge-cl-gear {
+  background: none; border: none; color: #7a8db0; font-size: 15px;
+  cursor: pointer; padding: 0 6px; line-height: 1;
+  transition: color 0.12s, transform 0.3s;
+  /* Sit with the × on the right edge, not floating mid-bar. */
+  margin-left: auto;
+}
+.nge-cl-gear:hover { color: #cfe0f5; transform: rotate(40deg); }
+
+.nge-cl-tabsettings {
+  position: absolute;
+  top: 42px; right: 10px;
+  z-index: 5;
+  width: 180px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(6, 10, 20, 0.97);
+  border: 1px solid rgba(100, 200, 255, 0.25);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+  display: flex; flex-direction: column; gap: 6px;
+  /* The panel clips its children (overflow hidden for rounded corners), so
+     the popover scrolls inside the panel's height instead of getting cut. */
+  max-height: calc(100% - 52px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.nge-cl-tabsettings-title {
+  font-family: 'Orbitron', 'Inter', sans-serif;
+  font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: rgba(100, 200, 255, 0.75);
+  margin-bottom: 2px;
+}
+.nge-cl-tabsettings-row {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: #cde; cursor: pointer;
+}
+.nge-cl-tabsettings-row input { accent-color: #64c8ff; }
+
 .nge-cl-title {
-  font-size: 0.9em;
+  font-family: 'Orbitron', 'Inter', sans-serif;
+  letter-spacing: 0.12em;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.03em;
   color: #eef;
 }
 .nge-cl-icon { width: 18px; height: 18px; object-fit: contain; vertical-align: middle; }
@@ -2485,6 +3267,141 @@ select.nge-cl-response-input:hover {
 .nge-cl-help-shot-preview--sm img { max-height: 48px; border-radius: 4px; }
 
 /* ── Help Request Create Form ── */
+.nge-cl-btn--tagdone {
+  font-size: 16px;
+  padding: 4px 12px;
+  border-color: rgba(96, 192, 96, 0.5) !important;
+}
+
+.nge-cl-tags-lanes { display: flex; gap: 6px; flex-wrap: wrap; }
+.nge-cl-tags-lanes button {
+  padding: 4px 10px; border-radius: 12px; font-size: 11.5px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #abc;
+}
+.nge-cl-tags-lanes button.nge-cl-lane--active {
+  background: rgba(245,209,66,0.14); border-color: rgba(245,209,66,0.5); color: #ffe9a0;
+}
+
+.nge-cl-tags-hint {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.45;
+}
+
+/* ── AI tab (model-detected candidates) ── */
+.nge-cl-ai-conf {
+  font-weight: 700;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 11.5px;
+  margin-left: 2px;
+}
+.nge-cl-btn--split {
+  font-size: 14px;
+  border-color: rgba(255, 140, 60, 0.4) !important;
+}
+.nge-cl-btn--split-active {
+  background: rgba(255, 140, 60, 0.2) !important;
+  border-color: rgba(255, 160, 80, 0.8) !important;
+}
+.nge-cl-ai-credit {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: -4px 0 9px;
+}
+.nge-cl-ai-scale { display: flex; align-items: center; gap: 7px; }
+.nge-cl-ai-scale-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #4a9eff, #ffd700);
+}
+.nge-cl-ai-dot { border-radius: 50%; flex-shrink: 0; }
+.nge-cl-ai-dot--cool { width: 8px; height: 8px; background: #4a9eff; }
+.nge-cl-ai-dot--hot {
+  width: 14px; height: 14px;
+  background: #ffd700;
+  box-shadow: 0 0 7px rgba(255, 215, 0, 0.6);
+}
+.nge-cl-ai-scale-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 3px;
+}
+.nge-cl-ai-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 6px;
+  margin-top: 8px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(100, 200, 255, 0.14);
+  user-select: none;
+}
+.nge-cl-ai-group-caret { color: rgba(100, 200, 255, 0.7); width: 12px; }
+.nge-cl-ai-group-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: rgba(160, 215, 255, 0.9);
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+.nge-cl-ai-group-heat {
+  margin-left: auto;
+  padding: 3px 9px;
+  border-radius: 11px;
+  font-size: 11px;
+  cursor: pointer;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #abc;
+}
+.nge-cl-ai-group-heat.nge-cl-lane--active {
+  background: rgba(245,209,66,0.14);
+  border-color: rgba(245,209,66,0.5);
+  color: #ffe9a0;
+}
+
+/* ── connectome.quest resources (Help tab footer) ── */
+.nge-cl-quest {
+  margin-top: 14px;
+  padding: 12px 12px 10px;
+  border: 1px solid rgba(100, 200, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(100, 200, 255, 0.04);
+}
+.nge-cl-quest-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(100, 200, 255, 0.75);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.nge-cl-quest-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 4px 10px;
+}
+.nge-cl-quest-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.75);
+  text-decoration: none;
+  font-size: 12px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.nge-cl-quest-link:hover {
+  background: rgba(100, 200, 255, 0.1);
+  color: #fff;
+}
+.nge-cl-quest-icon { font-size: 13px; line-height: 1; }
+.nge-cl-quest-label { white-space: nowrap; }
+
 .nge-cl-help-create {
   background: rgba(255, 136, 170, 0.04);
   border: 1px solid rgba(255, 136, 170, 0.15);
@@ -2573,19 +3490,19 @@ select.nge-cl-response-input:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 6px 12px;
   border-radius: 6px;
-  border: 1px dashed rgba(255, 136, 170, 0.35);
-  background: rgba(255, 136, 170, 0.06);
-  color: #f8a;
-  font-size: 0.78em;
+  border: 1px solid rgba(74, 158, 255, 0.3);
+  background: rgba(74, 158, 255, 0.06);
+  color: #8bf;
+  font-size: var(--nge-fs-sm);
   font-weight: 500;
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
 .nge-cl-help-shot-btn:hover {
-  background: rgba(255, 136, 170, 0.14);
-  border-color: rgba(255, 136, 170, 0.6);
+  background: rgba(74, 158, 255, 0.14);
+  border-color: rgba(74, 158, 255, 0.6);
 }
 .nge-cl-help-shot-preview {
   position: relative;

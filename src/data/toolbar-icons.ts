@@ -40,6 +40,11 @@ const S = 'width:1em;height:1em;vertical-align:middle;';
 const SPLIT_SVG     = `<svg viewBox="-0.05 -0.3 16.1 16.1" fill="none" style="${S}color:${ACCENT_RED}"><path d="M8 3v2a4 4 0 0 1-4 4H4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8 3v2a4 4 0 0 0 4 4h0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="2.5" r="1.4" fill="currentColor"/><circle cx="4" cy="13" r="1.4" fill="currentColor"/><circle cx="12" cy="13" r="1.4" fill="currentColor"/><path d="M4 9v4M12 9v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
 const MERGE_SVG     = `<svg viewBox="-0.05 -0.3 16.1 16.1" fill="none" style="${S}color:${ACCENT_GREEN}"><path d="M4 3v4a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4V3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="4" cy="2.5" r="1.4" fill="currentColor"/><circle cx="12" cy="2.5" r="1.4" fill="currentColor"/><circle cx="8" cy="13" r="1.4" fill="currentColor"/><path d="M8 11v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
 const FINDPATH_SVG  = `<svg viewBox="0.0 0.0 16.0 16.0" fill="none" style="${S}color:${ACCENT_PURPLE}"><circle cx="3" cy="13" r="1.6" fill="currentColor"/><circle cx="13" cy="3" r="1.6" fill="currentColor"/><path d="M5 12 Q7 9 8 8 Q9 7 11 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="1.4 1.8"/></svg>`;
+// Side panel — the neuroglancer layer side panel toggle, brought into our
+// toolbar so it's reorderable and toggleable like every other icon (the native
+// button is hidden in ng-override.css). A window frame with the right column
+// filled in, i.e. literally what the button does.
+const LAYERS_SVG    = `<svg viewBox="0 0 16 16" fill="none" style="${S}color:${NEUTRAL_COLOR}"><rect x="1.7" y="2.7" width="12.6" height="10.6" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M6.1 2.7v10.6" stroke="currentColor" stroke-width="1.4"/><path d="M2.9 5.4h1.7M2.9 7.6h1.7M2.9 9.8h1.7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
 // A week (calendar frame with day ticks) containing a rising trend line, so the
 // icon says "your week" + "progress" rather than the generic bar chart it was,
 // which was indistinguishable from any other stats/analytics glyph.
@@ -47,6 +52,18 @@ const RECAP_SVG       = `<svg viewBox="0 0 16 16" fill="none" style="${S}color:$
 const LEADERBOARD_SVG = `<svg viewBox="1.1 0.6 13.8 13.8" fill="none" style="${S}color:${ACCENT_AMBER}"><path d="M5 2h6v3.5a3 3 0 0 1-6 0V2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5 3H3v.8a2 2 0 0 0 2 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M11 3h2v.8a2 2 0 0 1-2 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 8.5v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5.5 13h5l-.5-1.4h-4z" fill="currentColor"/></svg>`;
 const BATCH_SVG       = `<svg viewBox="0.6 0.4 14.8 14.8" fill="none" style="${S}color:${NEUTRAL_COLOR}"><path d="M8 1.8L13.5 4.6V11L8 13.8L2.5 11V4.6L8 1.8z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M2.5 4.6L8 7.4L13.5 4.6M8 7.4V13.8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
 const HELP_SVG        = `<svg viewBox="1.4 1.4 13.4 13.4" fill="none" style="${S}color:${NEUTRAL_COLOR}"><circle cx="6.6" cy="6.6" r="3.8" stroke="currentColor" stroke-width="1.6"/><path d="M9.6 9.6l3.8 3.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
+// Map-pin over a crosshair tick: drop a flag exactly here.
+const ACCENT_SKY    = '#35b5ff';
+const TAG_SVG         = `<svg viewBox="0.6 0.2 14.8 15.4" fill="none" style="${S}color:${ACCENT_SKY}"><path d="M8 1.6a4.3 4.3 0 0 1 4.3 4.3c0 3-4.3 7.5-4.3 7.5S3.7 8.9 3.7 5.9A4.3 4.3 0 0 1 8 1.6z" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="5.9" r="1.5" fill="currentColor"/><path d="M8 14.4v1M5.4 15h5.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`;
+
+/** Open book — the right-edge resources menu (tutorials, site tour, links),
+ *  which used to be a hamburger that said nothing about what was inside. */
+export const RESOURCES_MENU_SVG = `<svg viewBox="0 0 16 16" fill="none" style="${S}color:${NEUTRAL_COLOR}"><path d="M8 3.4C6.9 2.4 5.2 2 3.4 2.1c-.5 0-.9.4-.9.9v8.6c0 .5.4.9.9.9 1.8-.1 3.5.3 4.6 1.3 1.1-1 2.8-1.4 4.6-1.3.5 0 .9-.4.9-.9V3c0-.5-.4-.9-.9-.9C10.8 2 9.1 2.4 8 3.4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 3.4v10.4" stroke="currentColor" stroke-width="1.4"/><path d="M4.6 5.6c.9 0 1.7.2 2.3.5M4.6 8c.9 0 1.7.2 2.3.5M9.1 6.1c.6-.3 1.4-.5 2.3-.5M9.1 8.5c.6-.3 1.4-.5 2.3-.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>`;
+
+/** The scout-tag map pin, reused everywhere tag mode shows its face. */
+export function scoutPinSvg(color = ACCENT_SKY, extraStyle = ''): string {
+  return `<svg viewBox="0.6 0.2 14.8 15.4" fill="none" style="${S}color:${color};${extraStyle}"><path d="M8 1.6a4.3 4.3 0 0 1 4.3 4.3c0 3-4.3 7.5-4.3 7.5S3.7 8.9 3.7 5.9A4.3 4.3 0 0 1 8 1.6z" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="5.9" r="1.5" fill="currentColor"/><path d="M8 14.4v1M5.4 15h5.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`;
+}
 const NOTIF_SVG       = `<svg viewBox="0.85 1.6 14.3 14.3" fill="none" style="${S}color:${NEUTRAL_COLOR}"><path d="M3.7 11.5h8.6c.5 0 .8-.5.5-.95L11.5 8.8V6.5a3.5 3.5 0 0 0-7 0v2.3L3.2 10.55c-.3.45 0 .95.5.95z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6.5 13a1.5 1.5 0 0 0 3 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 const CHAT_SVG        = `<svg viewBox="1.1 1.6 13.8 13.8" fill="none" style="${S}color:${NEUTRAL_COLOR}"><path d="M2.5 5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2H7L4.5 14v-2.5a2 2 0 0 1-2-2V5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
 // Heroicons cog-6-tooth — proper teeth, not radial lines.
@@ -54,16 +71,23 @@ const SETTINGS_SVG    = `<svg viewBox="1.6 1.6 20.8 20.8" fill="none" style="${S
 const QUEST_SVG       = `<svg viewBox="0.85 1.1 14.3 14.3" fill="none" style="${S}color:${NEUTRAL_COLOR}"><path d="M8 2.5C5.2 2.5 3 4.7 3 7.4c0 1.4.6 2.7 1.6 3.6.5.4.7 1 .7 1.6V14h5.4v-1.4c0-.6.2-1.2.7-1.6 1-.9 1.6-2.2 1.6-3.6 0-2.7-2.2-4.9-5-4.9z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.8 14h4.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`;
 const FEED_SVG        = `<svg viewBox="0.4 2.6 13.0 13.0" fill="none" style="${S}color:${NEUTRAL_COLOR}"><circle cx="3.2" cy="12.8" r="1.4" fill="currentColor"/><path d="M2 8.5a5.5 5.5 0 0 1 5.5 5.5M2 4a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
 
+/** The ship itself: a rocket in three-quarter climb for Flight Mode.
+ *  Not in the toolbar: flight is an easter egg (Amy). Kept for the day it
+ *  earns a plaque somewhere. */
+export const FLIGHT_SVG      = `<svg viewBox="1 1 14 14" fill="none" style="${S}color:${NEUTRAL_COLOR}"><path d="M9.3 2.6c1.9-.7 3.6-.6 4.1-.1.5.5.6 2.2-.1 4.1-.6 1.6-1.7 3.3-3.2 4.5l-.4 2.5c0 .3-.4.4-.6.2l-1.5-1.7c-.9.2-1.7.1-2.3-.4-.5-.6-.6-1.4-.4-2.3L3.2 8c-.2-.2-.1-.6.2-.6l2.5-.4c1.2-1.5 2.9-2.6 4.4-3.2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="10.4" cy="5.6" r="1.15" stroke="currentColor" stroke-width="1.1"/><path d="M4.9 11.1c-.7.3-1.3 1.4-1.5 2.5 1.1-.2 2.2-.8 2.5-1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
+
 export const TOOLBAR_ICON_DEFS: ToolbarIconDef[] = [
   { id: 'split',       emoji: '✂️', svg: SPLIT_SVG,       label: 'Cut Mode (C)' },
   { id: 'merge',       emoji: '🔗', svg: MERGE_SVG,       label: 'Merge Mode (M)' },
   { id: 'findPath',    emoji: '🛤️', svg: FINDPATH_SVG,    label: 'Find Path (F)' },
+  { id: 'layers',      emoji: '🗂️', svg: LAYERS_SVG,      label: 'Layer side panel' },
   { id: 'recap',       emoji: '📊', svg: RECAP_SVG,       label: 'Your Week in Science' },
   { id: 'leaderboard', emoji: '🏆', svg: LEADERBOARD_SVG, label: 'Leaderboard' },
   { id: 'quest',       emoji: '🧠', svg: QUEST_SVG,       label: 'Brain Quest' },
   { id: 'cells',       emoji: '🧬', img: neuronIcon,      label: 'Cell Library' },
   { id: 'batch',       emoji: '📦', svg: BATCH_SVG,       label: 'Batch Processor' },
   { id: 'help',        emoji: '🔍', svg: HELP_SVG,        label: 'Second Opinion Requests' },
+  { id: 'tags',        emoji: '📍', svg: TAG_SVG,         label: 'Tag Mode (Shift+T)' },
   { id: 'feed',        emoji: '📡', svg: FEED_SVG,        label: 'Activity Feed' },
   { id: 'notif',       emoji: '🔔', svg: NOTIF_SVG,       label: 'Notifications' },
   { id: 'chat',        emoji: '💬', svg: CHAT_SVG,        label: 'Chat' },
@@ -72,4 +96,111 @@ export const TOOLBAR_ICON_DEFS: ToolbarIconDef[] = [
 
 export function getToolbarIconDef(id: string): ToolbarIconDef | undefined {
   return TOOLBAR_ICON_DEFS.find(d => d.id === id);
+}
+
+/**
+ * Icon ids that are still defined (they keep their action/label) but are no
+ * longer shown in the toolbar. Single source of truth so the actual toolbar
+ * (ExtensionBar) and the Settings customization grid stay in sync — the grid
+ * must only offer icons that can really appear in the top bar.
+ */
+export const RETIRED_TOOLBAR_ICON_IDS = ['quest', 'feed', 'settings'];
+
+/**
+ * Default toolbar icon order for a user with no saved preference. Shared by the
+ * actual toolbar (ExtensionBar) and the Settings "Reset to defaults" grid so
+ * the two never drift — a mismatch here is exactly what left the Layers icon
+ * in the top bar but absent from Settings.
+ */
+// 'settings' retired 2026-08-11: Settings is a profile tab now (profile gear,
+// the ⌘K "Profile Settings" command, and Profile > Settings all reach it).
+// 'layers' moved to the right side 2026-08-12 (Amy: "layer side panel should
+// be farther right") — see REPOSITION_TOOLBAR_ICONS for saved prefs.
+export const DEFAULT_TOOLBAR_ORDER = [
+  'split', 'merge', 'findPath', 'recap', 'leaderboard',
+  'cells', 'batch', 'help', 'tags', 'layers', 'notif', 'chat',
+];
+
+/**
+ * Icons added after this feature shipped, so they're missing from older saved
+ * prefs. Auto-injected at a sensible slot by resolveToolbarOrder. Position is
+ * relative to an anchor so they land where they belong rather than at the end.
+ */
+const AUTO_INJECT_TOOLBAR_ICONS: { id: string; after?: string; beforeFallback?: string }[] = [
+  { id: 'batch',    beforeFallback: 'settings' },
+  { id: 'notif',    beforeFallback: 'settings' },
+  { id: 'chat',     beforeFallback: 'settings' },
+  { id: 'findPath', after: 'merge' },
+  { id: 'layers',   after: 'tags', beforeFallback: 'notif' },
+  { id: 'tags',     after: 'help', beforeFallback: 'notif' },
+];
+
+/**
+ * One-time repositions of icons that already exist in saved prefs, so a
+ * site-wide placement change reaches existing users too (auto-inject only
+ * covers ids missing from the saved order). The marker string is persisted in
+ * `toolbarIconsInjected` alongside the injected ids; once the user reorders
+ * and saves after the move, the marker keeps us from ever moving it again.
+ */
+const REPOSITION_TOOLBAR_ICONS: { id: string; after?: string; beforeFallback?: string; marker: string }[] = [
+  { id: 'layers', after: 'tags', beforeFallback: 'notif', marker: 'moved:layers:right:v1' },
+];
+
+/**
+ * Canonical toolbar order for a given saved preference. The ONE place that
+ * turns a user's stored `toolbarIcons` into what actually renders: fall back to
+ * the default when empty, inject icons added since the prefs were saved, and
+ * drop retired ids. Both the live toolbar (ExtensionBar) and the Settings grid
+ * call this, so what you toggle in Settings is exactly what the top bar shows.
+ *
+ * `findPath` is injected before `layers` in this list, because `layers` anchors
+ * itself after `layers`' own anchor `findPath`.
+ *
+ * `injected` is the per-user list of ids that have ALREADY been auto-injected
+ * once (prefs.toolbarIconsInjected). An id absent from `saved` but present in
+ * `injected` means the user removed it deliberately, so it stays removed.
+ * Array membership alone can't make that distinction, which was Celia's
+ * "icons don't get removed" bug (approved triage spec, 2026-08-11). Callers
+ * that persist prefs should also persist markInjected() to record the ids
+ * this call injected.
+ */
+export function resolveToolbarOrder(saved: string[], injected: string[] = []): string[] {
+  const order = saved.length > 0 ? [...saved] : [...DEFAULT_TOOLBAR_ORDER];
+  for (const spec of AUTO_INJECT_TOOLBAR_ICONS) {
+    if (order.includes(spec.id)) continue;
+    if (saved.length > 0 && injected.includes(spec.id)) continue; // user removed it
+    let at = order.length;
+    if (spec.after && order.indexOf(spec.after) >= 0) {
+      at = order.indexOf(spec.after) + 1;
+    } else if (spec.beforeFallback && order.indexOf(spec.beforeFallback) >= 0) {
+      at = order.indexOf(spec.beforeFallback);
+    }
+    order.splice(at, 0, spec.id);
+  }
+  for (const spec of REPOSITION_TOOLBAR_ICONS) {
+    if (saved.length === 0) continue;                 // defaults already have the new spot
+    if (injected.includes(spec.marker)) continue;     // move already applied and saved
+    const from = order.indexOf(spec.id);
+    if (from < 0) continue;
+    order.splice(from, 1);
+    let at = order.length;
+    if (spec.after && order.indexOf(spec.after) >= 0) {
+      at = order.indexOf(spec.after) + 1;
+    } else if (spec.beforeFallback && order.indexOf(spec.beforeFallback) >= 0) {
+      at = order.indexOf(spec.beforeFallback);
+    }
+    order.splice(at, 0, spec.id);
+  }
+  return order.filter(id => !RETIRED_TOOLBAR_ICON_IDS.includes(id));
+}
+
+/** Union of previously-injected ids with everything injectable (and every
+ *  reposition marker), for callers persisting prefs: once saved, every
+ *  auto-inject id counts as offered and every move as applied. */
+export function markInjected(injected: string[] = []): string[] {
+  return [...new Set([
+    ...injected,
+    ...AUTO_INJECT_TOOLBAR_ICONS.map(s => s.id),
+    ...REPOSITION_TOOLBAR_ICONS.map(s => s.marker),
+  ])];
 }

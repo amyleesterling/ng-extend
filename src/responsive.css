@@ -60,13 +60,26 @@
 
 /* ≤1366px — de-cram without shrinking the icons. */
 @media (max-width: 1366px) {
+  /* Slimmer bar on laptops (Amy: 40px "feels too tall"). Children center
+     within it; icon glyph size is untouched, only the hit-area shortens. */
+  #extensionBar {
+    height: 34px;
+  }
+  #extensionBar .nge-icon-btn {
+    height: 30px;
+  }
+  .nge-ask-btn {
+    height: 24px;
+  }
   .nge-dataset-btn {
-    gap: 0;
-    padding: 0 6px;
+    height: 30px;
   }
-  .nge-dataset-label {
-    display: none;
+  .nge-dataset-btn {
+    gap: 5px;
+    padding: 0 10px;
   }
+  /* The label used to be the full dataset name and had to hide here; it's
+     now the short "Data: <abbrev>" form, which fits at laptop widths. */
   .nge-streak-chip {
     padding: 0 7px;
   }

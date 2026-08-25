@@ -15,3 +15,13 @@ declare module '*.jpg' {
   const value: string;
   export default value;
 }
+
+/** Mesh assets (the scout pin) resolve to their emitted file URL. */
+declare module '*.obj' {
+  const value: string;
+  export default value;
+}
+declare module '*.vtk' {
+  const value: string;
+  export default value;
+}
