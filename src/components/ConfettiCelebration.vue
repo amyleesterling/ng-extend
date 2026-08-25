@@ -27,7 +27,7 @@ const underUI = ref(false);
  *  smoothly out instead of dropping fast then crawling (Amy 2026-08-24). */
 let veilT = -1;            // -1 = no veil
 const VEIL_MAX = 0.85;
-const VEIL_STEP = 1 / 84;  // ~1.4s at 60fps
+const VEIL_STEP = 1 / 54;  // ~0.9s at 60fps
 
 // Color palettes for different milestone types
 const PALETTES: Record<string, string[]> = {
@@ -126,13 +126,14 @@ const SPARKLE_COLORS = [
 function createSparkles(count: number) {
   const canvas = canvasRef.value;
   if (!canvas) return;
-  // Mobile: the whole shimmer completes inside 2 seconds (Amy 2026-08-18),
-  // tighter spawn stagger and a faster lifecycle. Desktop keeps the longer
+  // Mobile: a brief orienting moment — the whole shimmer lives and dies
+  // in about a second while the mind settles into the space; any longer
+  // and it blocks the view (Amy 2026-08-24). Desktop keeps the longer
   // ambient wash (up to ~6s).
   const mobile = isMobileRef.value;
   for (let i = 0; i < count; i++) {
     // Stagger spawn times so sparkles appear in waves, not all at once
-    const spawnDelay = Math.random() * (mobile ? 0.55 : 0.8);
+    const spawnDelay = Math.random() * (mobile ? 0.3 : 0.8);
     sparkles.push({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
@@ -140,7 +141,7 @@ function createSparkles(count: number) {
       phase: Math.random() * Math.PI * 2,
       speed: 0.03 + Math.random() * 0.05,   // faster twinkle
       life: -spawnDelay,                     // negative = waiting to appear
-      lifeSpeed: mobile ? 0.026 + Math.random() * 0.012
+      lifeSpeed: mobile ? 0.046 + Math.random() * 0.018
                         : 0.008 + Math.random() * 0.01,
       color: SPARKLE_COLORS[Math.floor(Math.random() * SPARKLE_COLORS.length)],
       maxOpacity: 0.7 + Math.random() * 0.3,  // brighter: 0.7–1.0
@@ -255,6 +256,8 @@ function animateSparkles() {
 function sparkle(intensity: number = 1) {
   resizeCanvas();
   underUI.value = true;
+  // Phones get a thinner field too — density reads as obstruction there.
+  if (isMobileRef.value) intensity *= 0.6;
   // Phones: the shimmer is a materialization — start behind a veil that
   // dissolves to reveal the scene. Desktop keeps the plain ambient wash.
   if (isMobileRef.value) veilT = 0;
