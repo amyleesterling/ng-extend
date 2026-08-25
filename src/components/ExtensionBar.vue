@@ -23,6 +23,8 @@ import NotificationFeedPanel from "components/NotificationFeedPanel.vue";
 import DatasetSelectorPanel from "components/DatasetSelectorPanel.vue";
 import ScreenshotDialog from "components/ScreenshotDialog.vue";
 import UsernamePrompt from "components/UsernamePrompt.vue";
+import MobileWelcome from "components/MobileWelcome.vue";
+import {isMobileRef, mobileWelcomeOpenRef} from '../util/mobile';
 import neuronIcon from '../../static/badges/pyr/neuron-icon-white.png';
 import pyrIcon from '../../static/badges/pyr/pyr-icon.png';
 
@@ -115,7 +117,10 @@ function shareActionX() {
 }
 function shareActionFacebook() {
   dismissShareToast();
-  const url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`;
+  // quote= prefills the post text; the link preview comes from the page's
+  // Open Graph tags (index.html).
+  const quote = 'Check out this neuron in EyeWire II';
+  const url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}&quote=${encodeURIComponent(quote)}`;
   window.open(url, '_blank', 'noopener,width=600,height=520');
 }
 
@@ -165,6 +170,13 @@ onMounted(() => {
       }
     }
   }, true);
+
+  // Mobile post-login landing: LoginModal asks for the Cell Library so a
+  // fresh login never stares at an empty forced-3D view.
+  document.addEventListener('nge:open-cell-library', (() => {
+    cellLibraryInitialTab.value = undefined;
+    showCellLibrary.value = true;
+  }) as EventListener);
 
   document.addEventListener('nge:open-profile', ((e: CustomEvent) => {
     profileUserId.value = e.detail?.userId || null;
@@ -234,7 +246,11 @@ const showFeed = ref(false);
 /** Chat visibility persists across reloads so closing it stays closed.
  *  Default = open on first visit (key absent in localStorage). */
 const CHAT_VISIBLE_KEY = 'nge_chat_visible_v1';
-const showChat = ref(localStorage.getItem(CHAT_VISIBLE_KEY) !== '0');
+// Mobile: chat defaults CLOSED (it would cover half the viewer); it opens
+// from the bottom nav or the welcome sheet. Desktop keeps default open.
+const showChat = ref(isMobileRef.value
+    ? localStorage.getItem(CHAT_VISIBLE_KEY) === '1'
+    : localStorage.getItem(CHAT_VISIBLE_KEY) !== '0');
 watch(showChat, (v) => {
   try { localStorage.setItem(CHAT_VISIBLE_KEY, v ? '1' : '0'); } catch {}
 });
@@ -246,6 +262,88 @@ const showFlightMode = ref(false);
 const konamiBuf: string[] = [];
 const showDatasetSelector = ref(false);
 const showNotifications = ref(false);
+
+// ── Mobile mode: welcome sheet + bottom nav ─────────────────────────────
+// The sheet greets every mobile visit once per browser session; the Guide
+// button in the bottom nav reopens it any time.
+const MOBILE_WELCOME_SEEN_KEY = 'nge_mobile_welcome_seen_v1';
+const showMobileWelcome = ref(
+    isMobileRef.value && sessionStorage.getItem(MOBILE_WELCOME_SEEN_KEY) !== '1');
+// LoginModal reads this shared ref: while the sheet is up, identity
+// verification stays out of the way (the sheet IS the mobile landing page).
+watch(showMobileWelcome, v => { mobileWelcomeOpenRef.value = v; }, {immediate: true});
+// A LOGGED-OUT mobile visit always leads with the sheet, even when this
+// browser session already saw it: without this, the seen-gate suppresses
+// the sheet on a revisit and Identity Verification fronts uninvited —
+// login should only pop after opting in from the sheet (Amy 2026-08-24).
+// One-shot per load, and never over a dismissal the visitor already made.
+let mobileWelcomeDismissedThisLoad = false;
+let mobileWelcomeAutoReopened = false;
+watch([() => login.checked, validLogins], ([checked, valid]) => {
+  if (!checked || !isMobileRef.value) return;
+  if (mobileWelcomeAutoReopened || mobileWelcomeDismissedThisLoad) return;
+  if ((valid as loginSession[]).length > 0 || showMobileWelcome.value) return;
+  mobileWelcomeAutoReopened = true;
+  showMobileWelcome.value = true;
+}, {immediate: true});
+function hideMobileWelcome() {
+  mobileWelcomeDismissedThisLoad = true;
+  showMobileWelcome.value = false;
+  try { sessionStorage.setItem(MOBILE_WELCOME_SEEN_KEY, '1'); } catch {}
+}
+/** Sheet dismissed in "just exploring" mode: also skip identity verification,
+ *  same as tapping BYPASS on the login box. */
+function exploreWithoutLogin() {
+  hideMobileWelcome();
+  document.dispatchEvent(new CustomEvent('nge:dismiss-login'));
+}
+/** "Log in" on the sheet: close it and start auth right away. The dispatch
+ *  is synchronous, so LoginModal's window.open still runs inside this tap's
+ *  user gesture — the Google popup isn't blocked. If no auth prompt has
+ *  surfaced yet, LoginModal simply takes the stage as before. */
+function mobileWelcomeLogin() {
+  hideMobileWelcome();
+  document.dispatchEvent(new CustomEvent('nge:request-login'));
+}
+function mobileOpenPanel(panel: 'cells' | 'chat' | 'profile' | 'leaderboard') {
+  switch (panel) {
+    case 'cells':
+      cellLibraryInitialTab.value = undefined;
+      showCellLibrary.value = true;
+      break;
+    case 'chat':
+      showChat.value = true;
+      chatStore.markRead();
+      break;
+    case 'profile':
+      profileUserId.value = null;
+      profileInitialTab.value = undefined;
+      showProfile.value = true;
+      break;
+    case 'leaderboard':
+      showLeaderboard.value = true;
+      break;
+  }
+}
+/** Bottom nav taps toggle their panel so a second tap closes it. */
+function mobileNavTap(panel: 'cells' | 'chat' | 'profile' | 'leaderboard') {
+  const isOpen: Record<typeof panel, boolean> = {
+    cells: showCellLibrary.value,
+    chat: showChat.value,
+    profile: showProfile.value,
+    leaderboard: showLeaderboard.value,
+  };
+  if (isOpen[panel]) {
+    switch (panel) {
+      case 'cells': showCellLibrary.value = false; break;
+      case 'chat': showChat.value = false; break;
+      case 'profile': showProfile.value = false; break;
+      case 'leaderboard': showLeaderboard.value = false; break;
+    }
+  } else {
+    mobileOpenPanel(panel);
+  }
+}
 const cmdPalette = ref<InstanceType<typeof CommandPalette> | null>(null);
 
 /**
@@ -852,6 +950,47 @@ function activateTool(toolType: 'multicut' | 'merge' | 'findPath') {
          opens (Amy 2026-08-17). -->
     <div id="ngFarRight"></div>
   </div>
+
+  <!-- ── Mobile only: welcome sheet + bottom nav (util/mobile.ts) ───────── -->
+  <!-- logged-in gates the Guide's link mode on VALID sessions only: a stale
+       token in localStorage must not hide the Log in button (Amy: the
+       landing pop-up needs login until you are actually in). -->
+  <mobile-welcome
+    v-if="isMobileRef"
+    :show="showMobileWelcome"
+    :logged-in="validLogins.length > 0"
+    :login-checked="login.checked"
+    :user-name="validLogins[0]?.name"
+    @hide="exploreWithoutLogin"
+    @login="mobileWelcomeLogin"
+    @open="mobileOpenPanel"
+  />
+  <teleport to="body">
+  <nav v-if="isMobileRef" class="nge-mobile-nav">
+    <button :class="{ 'nge-mnav--active': showCellLibrary }" @click="mobileNavTap('cells')">
+      <span class="nge-mnav-icon"><img :src="neuronIcon" class="nge-mnav-neuron" alt="" /></span>
+      <span class="nge-mnav-label">Cells</span>
+    </button>
+    <button :class="{ 'nge-mnav--active': showChat }" @click="mobileNavTap('chat')">
+      <span class="nge-mnav-icon">💬</span>
+      <span class="nge-mnav-label">Chat</span>
+      <span v-if="chatStore.unreadCount > 0" class="nge-mnav-badge">{{ chatStore.unreadCount }}</span>
+    </button>
+    <button :class="{ 'nge-mnav--active': showTagMode }" @click="showTagMode = !showTagMode">
+      <span class="nge-mnav-icon">📍</span>
+      <span class="nge-mnav-label">Tags</span>
+    </button>
+    <button :class="{ 'nge-mnav--active': showNotifications }" @click="showNotifications = !showNotifications">
+      <span class="nge-mnav-icon">🔔</span>
+      <span class="nge-mnav-label">Alerts</span>
+      <span v-if="backendStore.unreadNotificationCount > 0" class="nge-mnav-badge">{{ backendStore.unreadNotificationCount }}</span>
+    </button>
+    <button :class="{ 'nge-mnav--active': showMobileWelcome }" @click="showMobileWelcome = true">
+      <span class="nge-mnav-icon">✨</span>
+      <span class="nge-mnav-label">Guide</span>
+    </button>
+  </nav>
+  </teleport>
 </template>
 
 <style>

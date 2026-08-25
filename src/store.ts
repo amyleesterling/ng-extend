@@ -8,6 +8,7 @@ import {cancellableFetchSpecialOk, parseSpecialUrl} from 'neuroglancer/util/spec
 import {responseJson} from 'neuroglancer/util/http_request';
 
 import {Config, EYEWIRE_II_CAVE_CONFIG, getDatasetCaveConfig} from './config';
+import {isMobileRef} from './util/mobile';
 import {currentDatasetTag, canonicalDataset, currentSegLayer} from './datasets';
 import {supabase} from './supabase';
 import {getRootsFromSupervoxels} from './widgets/pcg_service';
@@ -59,6 +60,17 @@ export const useLoginStore = defineStore('login', () => {
   }
 
   async function update() {
+    try {
+      await doUpdate();
+    } finally {
+      // The mobile welcome sheet holds its login section blank until the
+      // first token check settles, so this must flip true on every exit
+      // path — including the mid-loop early return and thrown errors.
+      checked.value = true;
+    }
+  }
+
+  async function doUpdate() {
     const localStorageKeys: string[] = [];
     for (const key of Object.keys(window.localStorage)) {
       if (key.startsWith(TOKEN_PREFIX)) {
@@ -120,7 +132,11 @@ export const useLoginStore = defineStore('login', () => {
     sessions.value = newSessions;
   }
   const sessions: Ref<loginSession[]> = ref([]);
-  return {sessions, update, logout};
+  /** True once the first update() has settled — before that, nobody knows
+   *  yet whether the stored tokens are valid, so UI shouldn't claim either
+   *  logged-in or logged-out. */
+  const checked = ref(false);
+  return {sessions, update, logout, checked};
 });
 
 export interface Volume {
@@ -360,7 +376,36 @@ export const useLayersStore = defineStore('layers', () => {
     // set default values in settings
     viewer.chunkQueueManager.capacities.gpuMemory.sizeLimit.value = 2e9;
     viewer.chunkQueueManager.capacities.systemMemory.sizeLimit.value = 3e9;
-    viewer.layout.restoreState('xy-3d');
+    // Mobile defaults to fullscreen 3D (Amy 2026-08-18): split screen is
+    // reachable only from a share link that carries its own layout or the
+    // corner view toggle. A layout named in the URL hash wins on any device.
+    if (isMobileRef.value) {
+      // Captured ONCE at boot, before neuroglancer starts mirroring the
+      // full state (which always contains "layout") back into the hash.
+      // Only an inline share link, whose hash carries a literal layout key
+      // at page load, keeps its own view; everything else on a phone is
+      // fullscreen 3D, including curated dataset states that arrive later
+      // as #!url pointers (their remote fetch resolves after the hash has
+      // been rewritten, so the hash cannot be consulted at restore time).
+      const bootHadExplicitLayout = window.location.hash.includes('layout');
+      if (!bootHadExplicitLayout) {
+        viewer.layout.restoreState('3d');
+      }
+      const origRestore = viewer.state.restoreState.bind(viewer.state);
+      (viewer.state as any).restoreState = (obj: any) => {
+        if (obj && typeof obj === 'object' && !Array.isArray(obj) &&
+            !bootHadExplicitLayout) {
+          if ((obj as any).layout !== undefined) obj = {...obj, layout: '3d'};
+          // The seg side panel also stays closed on phones.
+          if ((obj as any).selectedLayer !== undefined) {
+            obj = {...obj, selectedLayer: {...(obj as any).selectedLayer, visible: false}};
+          }
+        }
+        origRestore(obj);
+      };
+    } else {
+      viewer.layout.restoreState('xy-3d');
+    }
 
     viewer.layerManager.layersChanged.add(refreshLayers);
     refreshLayers();
@@ -554,6 +599,8 @@ export const useLayersStore = defineStore('layers', () => {
       const {url: fetchUrl, credentialsProvider} = parseSpecialUrl(url, defaultCredentialsManager);
       const response = await cancellableFetchSpecialOk(credentialsProvider, fetchUrl, {}, responseJson);
       // Set layout first to avoid localPositionValid crashes during layout transitions
+      // Mobile: curated views open fullscreen 3D like everything else.
+      if (isMobileRef.value) response.layout = '3d';
       if (response.layout) {
         const layoutName = typeof response.layout === 'string'
           ? response.layout
