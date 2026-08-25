@@ -22,8 +22,12 @@ let sparkles: Sparkle[] = [];
  *  of readable UI (Amy 2026-08-24). Confetti bursts flip back on top. */
 const underUI = ref(false);
 /** Mobile shimmer opens behind a dark particle veil that dissolves away,
- *  so the app is REVEALED through the sparkles instead of overlapped. */
-let veil = 0;
+ *  so the app is REVEALED through the sparkles instead of overlapped.
+ *  veilT runs 0→1; opacity follows a cosine ease so the dissolve flows
+ *  smoothly out instead of dropping fast then crawling (Amy 2026-08-24). */
+let veilT = -1;            // -1 = no veil
+const VEIL_MAX = 0.85;
+const VEIL_STEP = 1 / 84;  // ~1.4s at 60fps
 
 // Color palettes for different milestone types
 const PALETTES: Record<string, string[]> = {
@@ -128,7 +132,7 @@ function createSparkles(count: number) {
   const mobile = isMobileRef.value;
   for (let i = 0; i < count; i++) {
     // Stagger spawn times so sparkles appear in waves, not all at once
-    const spawnDelay = Math.random() * (mobile ? 0.3 : 0.8);
+    const spawnDelay = Math.random() * (mobile ? 0.55 : 0.8);
     sparkles.push({
       x: Math.random() * canvas.width,
       y: Math.random() * canvas.height,
@@ -150,17 +154,19 @@ function animateSparkles() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   let alive = false;
-  // Dissolving veil: exponential fade (~1.2s) from near-opaque to nothing.
-  if (veil > 0.004) {
+  // Dissolving veil: cosine ease from near-opaque to nothing (~1.4s) —
+  // smooth at both ends, no jump.
+  if (veilT >= 0 && veilT <= 1) {
+    const opacity = VEIL_MAX * (0.5 + 0.5 * Math.cos(Math.PI * veilT));
     ctx.save();
     ctx.globalAlpha = 1;
-    ctx.fillStyle = `rgba(4, 9, 18, ${veil})`;
+    ctx.fillStyle = `rgba(4, 9, 18, ${opacity})`;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.restore();
-    veil *= 0.94;
+    veilT += VEIL_STEP;
     alive = true;
   } else {
-    veil = 0;
+    veilT = -1;
   }
   for (const s of sparkles) {
     s.life += s.lifeSpeed;
@@ -168,8 +174,10 @@ function animateSparkles() {
     if (s.life < 0) { alive = true; continue; } // waiting to spawn
     alive = true;
 
-    // Bell curve: fade in 0→1, fade out 1→2
-    const envelope = s.life <= 1 ? s.life : 2 - s.life;
+    // Bell curve with smoothstep shoulders: eases in and out instead of
+    // ramping linearly, so sparkles bloom and dissolve rather than pop.
+    const lin = s.life <= 1 ? s.life : 2 - s.life;
+    const envelope = lin * lin * (3 - 2 * lin);
     // Twinkle: rapid sin oscillation on top of envelope
     const twinkle = 0.5 + 0.5 * Math.sin(s.phase + s.life * 80 * s.speed);
     const alpha = envelope * twinkle * s.maxOpacity;
@@ -249,7 +257,7 @@ function sparkle(intensity: number = 1) {
   underUI.value = true;
   // Phones: the shimmer is a materialization — start behind a veil that
   // dissolves to reveal the scene. Desktop keeps the plain ambient wash.
-  if (isMobileRef.value) veil = 0.85;
+  if (isMobileRef.value) veilT = 0;
   const count = Math.round(120 * intensity);
   createSparkles(count);
   if (!animFrame) {
@@ -265,7 +273,7 @@ function sparkle(intensity: number = 1) {
 function trigger(palette: string = 'default', intensity: number = 1) {
   resizeCanvas();
   underUI.value = false;
-  veil = 0;
+  veilT = -1;
   const colors = PALETTES[palette] || PALETTES.default;
   const count = Math.round(80 * intensity);
   createParticles(count, colors);
