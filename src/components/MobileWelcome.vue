@@ -284,40 +284,43 @@ function shareEmail() {
   filter: drop-shadow(0 0 10px rgba(24, 207, 255, 0.35));
 }
 
+/* Fullscreen on phones: the sheet IS the landing page, not a box floating
+   over one (Amy 2026-08-25). The blocker just hosts it edge to edge. */
 .nge-mw-blocker {
   position: fixed;
   inset: 0;
   z-index: 10500;
-  background: rgba(2, 5, 12, 0.55);
-  backdrop-filter: blur(3px);
+  background: #070d1a;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
+  padding: 0;
   box-sizing: border-box;
 }
 
 .nge-mw-sheet {
   position: relative;
   width: 100%;
-  max-width: 520px;
-  max-height: 96dvh;
+  max-width: 560px;
+  height: 100dvh;
+  max-height: 100dvh;
   overflow-y: auto;
   box-sizing: border-box;
-  padding: 8px 18px calc(10px + env(safe-area-inset-bottom));
-  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  padding: calc(8px + env(safe-area-inset-top)) 18px calc(10px + env(safe-area-inset-bottom));
+  border-radius: 0;
+  border: none;
   background:
     radial-gradient(ellipse at 50% 0%, rgba(53, 181, 255, 0.10), transparent 60%),
     linear-gradient(180deg, #0b1424 0%, #070d1a 100%);
-  border: 1px solid rgba(53, 181, 255, 0.35);
-  border-top-color: rgba(53, 181, 255, 0.5);
-  box-shadow:
-    0 10px 40px rgba(0, 0, 0, 0.7),
-    0 0 30px rgba(53, 181, 255, 0.12),
-    inset 0 1px 0 rgba(53, 181, 255, 0.25);
   color: #dfe9ff;
   font-family: 'Roboto', sans-serif;
 }
+
+/* Vertically center the content on tall screens without clipping short
+   ones: auto margins inside a scroll container collapse safely. */
+.nge-mw-body { margin-top: auto; margin-bottom: auto; }
 
 .nge-mw-handle {
   width: 42px;
