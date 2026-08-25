@@ -21,8 +21,8 @@
  * User iteration: we only mirror operations for users we can attribute,
  * i.e. rows in Supabase `users` with a non-null cave_user_id (captured at
  * middleauth login). New users get picked up on their first sync after
- * login. First run backfills from EPOCH_START; later runs look back
- * LOOKBACK_DAYS to catch stragglers cheaply.
+ * login. First run backfills from EPOCH_START; later runs resume from the
+ * newest mirrored op minus a one-day margin, so history is fetched once.
  *
  * Response shape: user_operations returns per-operation records with an
  * operation id, a timestamp, and merge/split discriminator. Exact field
@@ -79,9 +79,9 @@ const TABLES = [
 ];
 
 // First sync backfills from before the earliest dataset existed
-// (stroeh's oldest_timestamp is 2025-02-20). Later runs use LOOKBACK_DAYS.
+// (stroeh's oldest_timestamp is 2025-02-20). Later runs resume from the
+// newest mirrored op minus RESUME_MARGIN_MS.
 const EPOCH_START   = '2025-01-01T00:00:00Z';
-const LOOKBACK_DAYS = 7;
 
 const flags = new Set(process.argv.slice(2));
 const dryRun = flags.has('--dry-run');
@@ -97,7 +97,7 @@ const supabaseHeaders = {
 };
 
 async function getAttributableUsers() {
-  const url = `${SUPABASE_URL}/rest/v1/users?select=id,display_name,cave_user_id&cave_user_id=not.is.null`;
+  const url = `${SUPABASE_URL}/rest/v1/users?select=id,display_name,cave_user_id,last_edit_at,last_cave_sync_at&cave_user_id=not.is.null`;
   const res = await fetch(url, { headers: supabaseHeaders });
   if (!res.ok) throw new Error(`users lookup failed: ${res.status} ${await res.text()}`);
   const rows = await res.json();
@@ -105,12 +105,35 @@ async function getAttributableUsers() {
   return rows;
 }
 
-/** True when the mirror already has rows (first run → full backfill). */
-async function mirrorHasRows() {
-  const url = `${SUPABASE_URL}/rest/v1/cave_edits_mirror?select=operation_id&limit=1`;
+const RESUME_MARGIN_MS = 24 * 60 * 60 * 1000; // re-cover 1 day for stragglers
+
+// ── Activity-driven sync (Amy: "do we really need to query quiet users?") ──
+// The app witnesses every in-app edit, so CAVE is only consulted to
+// canonicalize activity we already saw:
+//   dirty  ==  last_edit_at > last_cave_sync_at   (both our clocks)
+// The client stamps last_edit_at on edits; we stamp last_cave_sync_at after
+// checking a user, which self-clears dirtiness and self-retries on failure.
+// A small drizzle of the longest-unchecked users each run catches edits
+// made outside the app with flat load. Quiet users cost zero.
+const DRIZZLE_PER_RUN = 3;
+
+/** Per (cave_user_id, dataset) newest mirrored op, each user's own window. */
+async function watermarkMap() {
+  const url = `${SUPABASE_URL}/rest/v1/cave_edits_watermarks?select=cave_user_id,dataset,newest`;
   const res = await fetch(url, { headers: supabaseHeaders });
-  if (!res.ok) throw new Error(`mirror probe failed: ${res.status} ${await res.text()}`);
-  return (await res.json()).length > 0;
+  if (!res.ok) throw new Error(`watermarks probe failed: ${res.status} ${await res.text()}`);
+  const map = new Map();
+  for (const r of await res.json()) map.set(`${r.cave_user_id}|${r.dataset}`, r.newest);
+  return map;
+}
+
+/** Stamp a user as checked; failures leave them dirty for the next run. */
+async function stampSynced(userId, iso) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/users?id=eq.${encodeURIComponent(userId)}`, {
+    method: 'PATCH', headers: supabaseHeaders,
+    body: JSON.stringify({ last_cave_sync_at: iso }),
+  });
+  if (!res.ok) console.warn(`[sync-edits] sync stamp failed for ${userId}: ${res.status}`);
 }
 
 const sampleLogged = new Set();
@@ -199,19 +222,44 @@ async function upsertBatch(rows) {
   const users = await getAttributableUsers();
   if (!users.length) { console.log('[sync-edits] nothing to do'); return; }
 
-  const backfill = fullBackfill || !(await mirrorHasRows());
   const endIso = new Date().toISOString();
-  const startIso = backfill
-    ? EPOCH_START
-    : new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  console.log(`[sync-edits] window ${startIso} → ${endIso} (${backfill ? 'FULL BACKFILL' : `${LOOKBACK_DAYS}d lookback`})`);
+
+  // Pick who to check: everyone on --full-backfill; otherwise the dirty
+  // users (edited since we last checked them) plus a drizzle of the
+  // longest-unchecked, which also serves as the initial rolling backfill.
+  let syncUsers = users;
+  let wm = new Map();
+  if (!fullBackfill) {
+    try {
+      wm = await watermarkMap();
+      const dirty = users.filter(u =>
+        u.last_edit_at && (!u.last_cave_sync_at || Date.parse(u.last_edit_at) > Date.parse(u.last_cave_sync_at)));
+      const dirtyIds = new Set(dirty.map(u => u.id));
+      const drizzle = users
+        .filter(u => !dirtyIds.has(u.id))
+        .sort((a2, b2) => (a2.last_cave_sync_at ? Date.parse(a2.last_cave_sync_at) : 0) -
+                          (b2.last_cave_sync_at ? Date.parse(b2.last_cave_sync_at) : 0))
+        .slice(0, DRIZZLE_PER_RUN);
+      syncUsers = dirty.concat(drizzle);
+      console.log(`[sync-edits] ${dirty.length} dirty + ${drizzle.length} drizzle of ${users.length} users`);
+    } catch (e) {
+      console.warn(`[sync-edits] activity data unavailable (${e.message}), checking all users`);
+    }
+  }
 
   let failed = 0;
+  const permissionWaits = [];
   for (const cfg of targets) {
     console.log(`[sync-edits] === ${cfg.dataset} (${cfg.pcgTable}) ===`);
     let tableTotal = 0;
-    for (const u of users) {
+    for (const u of syncUsers) {
       try {
+        // This user's own window: just behind their newest mirrored op in
+        // this dataset; no watermark means their personal full backfill.
+        const newest = fullBackfill ? null : wm.get(`${u.cave_user_id}|${cfg.dataset}`);
+        const startIso = newest
+          ? new Date(Date.parse(newest) - RESUME_MARGIN_MS).toISOString()
+          : EPOCH_START;
         const payload = await fetchUserOperations(cfg, u.cave_user_id, startIso, endIso);
         if (payload == null) { console.log(`[sync-edits] ${cfg.dataset}: endpoint 404 — skipping table`); break; }
         const ops = extractOperations(payload, `${cfg.dataset}`);
@@ -226,15 +274,27 @@ async function upsertBatch(rows) {
         }
       } catch (e) {
         if (e.permissionGated) {
-          console.error(`[sync-edits] ${e.message}`);
-          console.error('[sync-edits] Aborting: every further call would 403. See HANDOFF-BUGFIX-WIP.md §3.1 for the exact grant to request.');
-          process.exit(2);
+          // Known waiting state, not a malfunction, and PER DATASET: CAVE
+          // grants admin_view per dataset, so a 403 on one (the probe's was
+          // stroeh-mouse-retina) must not block the others. Skip this
+          // dataset and move on; the summary below says which are waiting.
+          console.error(`[sync-edits] ${cfg.dataset}: ${e.message}`);
+          console.error(`[sync-edits] ${cfg.dataset}: WAITING on admin_view for this dataset, skipping it this run.`);
+          permissionWaits.push(cfg.dataset);
+          break;
         }
         failed++;
         console.error(`[sync-edits] ${cfg.dataset} user ${u.cave_user_id}: ${e.message}`);
       }
     }
     console.log(`[sync-edits] ${cfg.dataset}: upserted ${tableTotal} operations`);
+  }
+  // Stamp everyone we checked; a user whose datasets all errored keeps an
+  // old stamp and stays dirty, so the next run retries them naturally.
+  for (const u of syncUsers) await stampSynced(u.id, endIso);
+
+  if (permissionWaits.length) {
+    console.error(`[sync-edits] WAITING on admin_view for: ${permissionWaits.join(', ')} (HANDOFF-BUGFIX-WIP.md 3.1). Green exit so the cron does not page anyone; these datasets resume the moment the grant lands.`);
   }
   if (failed) {
     console.error(`[sync-edits] completed with ${failed} per-user failures`);
