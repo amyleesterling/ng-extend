@@ -274,14 +274,16 @@ function shareEmail() {
     radial-gradient(1px 1px at 44% 56%, rgba(206, 147, 216, 0.65) 0%, transparent 100%),
     radial-gradient(2px 2px at 70% 28%, rgba(53, 181, 255, 0.85) 0%, transparent 100%),
     radial-gradient(1px 1px at 16% 44%, rgba(255, 255, 255, 0.6) 0%, transparent 100%);
-  animation: nge-mw-sparkle-burst 2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  /* ease-in-out over a longer run: the burst breathes in and dissolves
+     out instead of snapping to full brightness (Amy 2026-08-24). */
+  animation: nge-mw-sparkle-burst 2.6s ease-in-out forwards;
 }
 
 @keyframes nge-mw-sparkle-burst {
-  0%   { opacity: 0;    transform: scale(0.72); filter: brightness(1.4); }
-  18%  { opacity: 1; }
-  55%  { opacity: 0.65; transform: scale(1.05); filter: brightness(2.4); }
-  100% { opacity: 0;    transform: scale(1.22); filter: brightness(1); }
+  0%   { opacity: 0;    transform: scale(0.96); filter: brightness(1); }
+  30%  { opacity: 0.9;  transform: scale(1.0);  filter: brightness(1.5); }
+  60%  { opacity: 0.6;  transform: scale(1.04); filter: brightness(1.7); }
+  100% { opacity: 0;    transform: scale(1.1);  filter: brightness(1); }
 }
 
 .nge-mw-handle {
