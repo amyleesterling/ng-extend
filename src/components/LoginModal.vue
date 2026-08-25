@@ -215,9 +215,16 @@ function handleLoginSuccess() {
       setTimeout(() => scanForLoginPrompts(), delay);
     }
 
-    // After login, auto-select the segmentation layer and open the Seg tab
-    // so the user lands in the expected view.
-    setTimeout(() => openSegPanel(), 1500);
+    // After login, land somewhere with something to see. Desktop:
+    // auto-select the segmentation layer and open the Seg tab. Phones:
+    // the forced-3D view is empty until a neuron is chosen, so the seg
+    // tab reads as a blank page (Amy 2026-08-24) — open the Cell
+    // Library instead: pick a neuron, see it in 3D.
+    if (isMobileRef.value) {
+      setTimeout(() => document.dispatchEvent(new CustomEvent('nge:open-cell-library')), 600);
+    } else {
+      setTimeout(() => openSegPanel(), 1500);
+    }
   }
   // Otherwise modal stays open — user clicks the next server's Login button
 }

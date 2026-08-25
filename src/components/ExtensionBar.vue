@@ -171,6 +171,13 @@ onMounted(() => {
     }
   }, true);
 
+  // Mobile post-login landing: LoginModal asks for the Cell Library so a
+  // fresh login never stares at an empty forced-3D view.
+  document.addEventListener('nge:open-cell-library', (() => {
+    cellLibraryInitialTab.value = undefined;
+    showCellLibrary.value = true;
+  }) as EventListener);
+
   document.addEventListener('nge:open-profile', ((e: CustomEvent) => {
     profileUserId.value = e.detail?.userId || null;
     // Optional deep-link tab ('triage' opens Admin Hub > Triage, etc.)
