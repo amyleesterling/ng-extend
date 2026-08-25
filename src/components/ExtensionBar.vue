@@ -265,7 +265,22 @@ const showMobileWelcome = ref(
 // LoginModal reads this shared ref: while the sheet is up, identity
 // verification stays out of the way (the sheet IS the mobile landing page).
 watch(showMobileWelcome, v => { mobileWelcomeOpenRef.value = v; }, {immediate: true});
+// A LOGGED-OUT mobile visit always leads with the sheet, even when this
+// browser session already saw it: without this, the seen-gate suppresses
+// the sheet on a revisit and Identity Verification fronts uninvited —
+// login should only pop after opting in from the sheet (Amy 2026-08-24).
+// One-shot per load, and never over a dismissal the visitor already made.
+let mobileWelcomeDismissedThisLoad = false;
+let mobileWelcomeAutoReopened = false;
+watch([() => login.checked, validLogins], ([checked, valid]) => {
+  if (!checked || !isMobileRef.value) return;
+  if (mobileWelcomeAutoReopened || mobileWelcomeDismissedThisLoad) return;
+  if ((valid as loginSession[]).length > 0 || showMobileWelcome.value) return;
+  mobileWelcomeAutoReopened = true;
+  showMobileWelcome.value = true;
+}, {immediate: true});
 function hideMobileWelcome() {
+  mobileWelcomeDismissedThisLoad = true;
   showMobileWelcome.value = false;
   try { sessionStorage.setItem(MOBILE_WELCOME_SEEN_KEY, '1'); } catch {}
 }
