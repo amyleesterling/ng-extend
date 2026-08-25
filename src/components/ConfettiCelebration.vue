@@ -17,6 +17,13 @@ let ctx: CanvasRenderingContext2D | null = null;
 let animFrame = 0;
 let particles: Particle[] = [];
 let sparkles: Sparkle[] = [];
+/** Sparkle-only runs render UNDER the mobile welcome sheet (z 10400 vs its
+ *  10500): the shimmer is scenery the sheet floats over, never dots on top
+ *  of readable UI (Amy 2026-08-24). Confetti bursts flip back on top. */
+const underUI = ref(false);
+/** Mobile shimmer opens behind a dark particle veil that dissolves away,
+ *  so the app is REVEALED through the sparkles instead of overlapped. */
+let veil = 0;
 
 // Color palettes for different milestone types
 const PALETTES: Record<string, string[]> = {
@@ -143,6 +150,18 @@ function animateSparkles() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   let alive = false;
+  // Dissolving veil: exponential fade (~1.2s) from near-opaque to nothing.
+  if (veil > 0.004) {
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = `rgba(4, 9, 18, ${veil})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    veil *= 0.94;
+    alive = true;
+  } else {
+    veil = 0;
+  }
   for (const s of sparkles) {
     s.life += s.lifeSpeed;
     if (s.life > 2) continue; // dead
@@ -227,6 +246,10 @@ function animateSparkles() {
  */
 function sparkle(intensity: number = 1) {
   resizeCanvas();
+  underUI.value = true;
+  // Phones: the shimmer is a materialization — start behind a veil that
+  // dissolves to reveal the scene. Desktop keeps the plain ambient wash.
+  if (isMobileRef.value) veil = 0.85;
   const count = Math.round(120 * intensity);
   createSparkles(count);
   if (!animFrame) {
@@ -241,6 +264,8 @@ function sparkle(intensity: number = 1) {
  */
 function trigger(palette: string = 'default', intensity: number = 1) {
   resizeCanvas();
+  underUI.value = false;
+  veil = 0;
   const colors = PALETTES[palette] || PALETTES.default;
   const count = Math.round(80 * intensity);
   createParticles(count, colors);
@@ -271,6 +296,7 @@ defineExpose({ trigger, sparkle });
     <canvas
       ref="canvasRef"
       class="nge-confetti-canvas"
+      :class="{ 'nge-confetti-canvas--under': underUI }"
     />
   </Teleport>
 </template>
@@ -284,4 +310,6 @@ defineExpose({ trigger, sparkle });
   width: 100vw;
   height: 100vh;
 }
+/* Sparkle-only runs: below the mobile welcome sheet (10500), above the rest. */
+.nge-confetti-canvas--under { z-index: 10400; }
 </style>
