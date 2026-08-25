@@ -109,9 +109,6 @@ function shareEmail() {
   <transition name="nge-mw">
     <div v-if="show" class="nge-mw-blocker" @click.self="dismiss">
       <div class="nge-mw-sheet" role="dialog" aria-label="EyeWire II on mobile">
-        <!-- A wee brilliant beautiful burst: 2 seconds of sparkle on open,
-             then gone. Pure CSS, plays on each mount. -->
-        <div class="nge-mw-sparkles" aria-hidden="true"></div>
         <div class="nge-mw-handle"></div>
         <button class="nge-mw-close" @click="dismiss" title="Close">×</button>
 
@@ -253,37 +250,6 @@ function shareEmail() {
     inset 0 1px 0 rgba(53, 181, 255, 0.25);
   color: #dfe9ff;
   font-family: 'Roboto', sans-serif;
-}
-
-/* Sparkle burst overlay */
-.nge-mw-sparkles {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background-image:
-    radial-gradient(2px 2px at 12% 18%, rgba(191, 233, 255, 0.95) 0%, transparent 100%),
-    radial-gradient(1.5px 1.5px at 78% 12%, rgba(53, 181, 255, 0.9) 0%, transparent 100%),
-    radial-gradient(1px 1px at 32% 38%, rgba(255, 255, 255, 0.85) 0%, transparent 100%),
-    radial-gradient(2px 2px at 88% 42%, rgba(140, 210, 255, 0.85) 0%, transparent 100%),
-    radial-gradient(1.5px 1.5px at 52% 8%, rgba(206, 147, 216, 0.75) 0%, transparent 100%),
-    radial-gradient(1px 1px at 8% 62%, rgba(53, 181, 255, 0.8) 0%, transparent 100%),
-    radial-gradient(2px 2px at 64% 70%, rgba(191, 233, 255, 0.8) 0%, transparent 100%),
-    radial-gradient(1px 1px at 92% 82%, rgba(255, 255, 255, 0.7) 0%, transparent 100%),
-    radial-gradient(1.5px 1.5px at 24% 86%, rgba(140, 210, 255, 0.8) 0%, transparent 100%),
-    radial-gradient(1px 1px at 44% 56%, rgba(206, 147, 216, 0.65) 0%, transparent 100%),
-    radial-gradient(2px 2px at 70% 28%, rgba(53, 181, 255, 0.85) 0%, transparent 100%),
-    radial-gradient(1px 1px at 16% 44%, rgba(255, 255, 255, 0.6) 0%, transparent 100%);
-  /* ease-in-out over a longer run: the burst breathes in and dissolves
-     out instead of snapping to full brightness (Amy 2026-08-24). */
-  animation: nge-mw-sparkle-burst 2.6s ease-in-out forwards;
-}
-
-@keyframes nge-mw-sparkle-burst {
-  0%   { opacity: 0;    transform: scale(0.96); filter: brightness(1); }
-  30%  { opacity: 0.9;  transform: scale(1.0);  filter: brightness(1.5); }
-  60%  { opacity: 0.6;  transform: scale(1.04); filter: brightness(1.7); }
-  100% { opacity: 0;    transform: scale(1.1);  filter: brightness(1); }
 }
 
 .nge-mw-handle {
