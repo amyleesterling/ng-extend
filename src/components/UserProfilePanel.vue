@@ -4,11 +4,17 @@ import {storeToRefs} from 'pinia';
 import ModalOverlay from 'components/ModalOverlay.vue';
 import AdminHub from 'components/AdminHub.vue';
 import WeeklyRecapPanel from 'components/WeeklyRecapPanel.vue';
+import SettingsPanel from 'components/SettingsPanel.vue';
+import RollUp from 'components/RollUp.vue';
+import { runPanelTrace } from '../util/holo_trace';
+import { isMobileRef } from '../util/mobile';
 
 import {useLoginStore, useUserStatsStore, useUserPreferencesStore, useCellHistoryStore, useProofreadingBackendStore, useHelpRequestStore, CellHistoryEntry} from '../store';
 import {BADGE_DEFINITIONS, BUILDING_BADGES, EXPLORATION_BADGES, BadgeDefinition, BadgeTrack, statKeyForTrack} from '../widgets/badge_definitions';
 import {BADGE_IMAGE_MAP} from '../widgets/badge_images';
 import {DEMO_USERS, DEMO_COMMUNITY_EDITS_WEEK, DEMO_COMMUNITY_EDITS_MONTH} from '../data/demo-users';
+import {DATASETS, DatasetEntry, SPECIES_ICONS, segLayerName, canonicalDataset, currentSegLayerName, switchToDataset} from '../datasets';
+import {useIssueTagStore, type IssueTag} from '../store';
 import {EYEWIRE_FLAG} from '../data/countries';
 import pyrIcon from '../../static/badges/pyr/pyr-icon.png';
 
@@ -129,7 +135,7 @@ const BADGE_PREVIEW_WITH_VIEWALL = 7;  // 7 badges + 1 "View All" tile = 8 slots
 const SPECIAL_PREVIEW_LIMIT = 8;
 
 // ── Profile tabs ─────────────────────────────────────────────────────────────
-const activeTab = ref<'overview' | 'trophyCase' | 'weekInScience' | 'adminHub'>('overview');
+const activeTab = ref<'overview' | 'trophyCase' | 'datasets' | 'weekInScience' | 'adminHub' | 'settings'>('overview');
 
 /** Monday-anchored key for the current week, e.g. "2026-07-13". */
 function isoWeekKey(): string {
@@ -174,13 +180,169 @@ function openWeekInScience() {
   maybeSendWeeklyRecapNotification();
 }
 
+// ── Scout Report: your tag activity, all lanes ───────────────────────────────
+const issueTagStore = useIssueTagStore();
+const myTagsPlaced = computed(() =>
+  issueTagStore.tags.filter((t: IssueTag) => t.userId && t.userId === backendStore.userId));
+const myTagsFixed = computed(() =>
+  myTagsPlaced.value.filter((t: IssueTag) => t.status === 'resolved'));
+const tagsIFixed = computed(() =>
+  issueTagStore.tags.filter((t: IssueTag) =>
+    t.status === 'resolved' && t.resolvedById && t.resolvedById === backendStore.userId));
+
+// The particle trace: an arc of light runs the shell boundary once when the
+// profile arrives (scifi-ui hologram.js section 1, via util/holo_trace).
+const shellEl = ref<HTMLElement | null>(null);
+
+/**
+ * NEVER-CLIPPED WATCHDOG (Amy: "why do I have to ask every day").
+ * CSS clamps have failed in the wild more than once (overlay stacking,
+ * status bar, specificity fights), so this measures the ACTUAL rendered
+ * rects and force-fixes them inline, which no stylesheet can override.
+ * If it ever has to intervene it logs the measurements, so the next
+ * report comes with data instead of another round of guessing.
+ */
+function clampProfile() {
+  const shell = shellEl.value;
+  if (!shell) return;
+  const overlay = shell.closest('.overlay-content') as HTMLElement | null;
+  const vh = window.innerHeight, vw = window.innerWidth;
+  const target = overlay ?? shell;
+  const r = target.getBoundingClientRect();
+  const clipped = r.bottom > vh - 4 || r.top < 4 || r.right > vw - 4 || r.left < 4;
+  if (!clipped) return;
+  console.warn('[profile] clip watchdog engaged:', {
+    overlay: overlay?.getBoundingClientRect(), shell: shell.getBoundingClientRect(),
+    vh, vw, shellMaxH: getComputedStyle(shell).maxHeight,
+    overlayTransform: overlay ? getComputedStyle(overlay).transform : null,
+  });
+  shell.style.maxHeight = (vh - 56) + 'px';
+  shell.style.maxWidth = (vw - 48) + 'px';
+  if (overlay) {
+    overlay.style.maxHeight = (vh - 24) + 'px';
+    overlay.style.maxWidth = (vw - 24) + 'px';
+    overlay.style.top = '50%';
+    overlay.style.left = '50%';
+    overlay.style.transform = 'translate(-50%, -50%)';
+    overlay.style.overflow = 'auto';
+  }
+}
+let clampTimer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  // Re-check as the open animation settles, on every resize, and briefly on
+  // an interval to catch late layout (fonts, images, tab content).
+  requestAnimationFrame(clampProfile);
+  setTimeout(clampProfile, 350);
+  window.addEventListener('resize', clampProfile);
+  clampTimer = setInterval(clampProfile, 700);
+  setTimeout(() => { if (clampTimer) { clearInterval(clampTimer); clampTimer = null; } }, 4000);
+});
+onUnmounted(() => {
+  window.removeEventListener('resize', clampProfile);
+  if (clampTimer) clearInterval(clampTimer);
+});
+watch(() => shellEl.value, () => requestAnimationFrame(clampProfile));
+watch(() => activeTab.value, () => { requestAnimationFrame(clampProfile); setTimeout(clampProfile, 320); });
+
+onMounted(() => {
+  setTimeout(() => { if (shellEl.value) runPanelTrace(shellEl.value); }, 60);
+});
+
 // Deep-link: open directly on a given tab (e.g. from the toolbar/command palette
 // "Your Week in Science" action).
 onMounted(() => {
   if (props.initialTab === 'weekInScience' && !viewingOtherUser.value) {
     openWeekInScience();
+  } else if (props.initialTab === 'datasets' && !viewingOtherUser.value) {
+    activeTab.value = 'datasets';
+  } else if (props.initialTab === 'settings' && !viewingOtherUser.value) {
+    activeTab.value = 'settings';
+  } else if (props.initialTab === 'triage' && !viewingOtherUser.value) {
+    // Deep-link from a 🗂 triage notification: straight to the review queue.
+    activeTab.value = 'adminHub';
+    adminInitialSubTab.value = 'triage';
   }
 });
+
+/** Sub-tab AdminHub should open on; set by the triage deep-link. */
+const adminInitialSubTab = ref<string | undefined>(undefined);
+
+// ── Datasets tab: per-dataset contributions + switcher ───────────────────────
+// One card per known dataset with this user's contribution counts, doubling as
+// the dataset switcher (same switchToDataset the top-bar selector uses).
+interface DatasetContribution { edits: number; completions: number; helpRequests: number; }
+const datasetStats = ref<Record<string, DatasetContribution>>({});
+const datasetStatsLoading = ref(false);
+const activeDatasetCanon = ref('');
+const switchingDatasetId = ref<string | null>(null);
+
+function refreshActiveDatasetCanon() {
+  activeDatasetCanon.value = canonicalDataset(currentSegLayerName());
+}
+
+/** All dataset-tag variants that rows for this dataset may carry. edit_log and
+ *  help_requests are canonicalised, but cave_completions_mirror stamps the
+ *  sync config's own name (e.g. 'pinky_sandbox' where canonical is
+ *  'pinky_nf_v2'), so count with .in() across the variants. */
+function datasetTagVariants(ds: DatasetEntry): string[] {
+  return [...new Set([canonicalDataset(segLayerName(ds)), ds.id, segLayerName(ds)])];
+}
+
+async function loadDatasetStats() {
+  if (datasetStatsLoading.value) return;
+  datasetStatsLoading.value = true;
+  refreshActiveDatasetCanon();
+  try {
+    const uid = backendStore.userId;
+    if (!uid) return;
+    const { supabase } = await import('../supabase');
+    // Numeric CAVE id keys the completions mirror (users.cave_user_id).
+    let caveId: number | null = null;
+    try {
+      const { data } = await supabase.from('users').select('cave_user_id').eq('id', uid).single();
+      caveId = data?.cave_user_id ?? null;
+    } catch {}
+    const out: Record<string, DatasetContribution> = {};
+    await Promise.all(DATASETS.map(async ds => {
+      const tags = datasetTagVariants(ds);
+      const [edits, completions, helpRequests] = await Promise.all([
+        supabase.from('edit_log').select('id', { count: 'exact', head: true })
+          .eq('user_id', uid).in('dataset', tags).then((r: any) => r.count ?? 0),
+        caveId == null ? Promise.resolve(0) :
+          supabase.from('cave_completions_mirror').select('segment_id', { count: 'exact', head: true })
+            .eq('cave_user_id', caveId).in('dataset', tags).then((r: any) => r.count ?? 0),
+        supabase.from('help_requests').select('id', { count: 'exact', head: true })
+          .eq('user_id', uid).in('dataset', tags).then((r: any) => r.count ?? 0),
+      ]);
+      out[canonicalDataset(segLayerName(ds))] = { edits, completions, helpRequests };
+    }));
+    datasetStats.value = out;
+  } catch (e) {
+    console.warn('[profile] loadDatasetStats failed:', e);
+  } finally {
+    datasetStatsLoading.value = false;
+  }
+}
+
+watch(activeTab, tab => { if (tab === 'datasets') loadDatasetStats(); });
+
+async function switchProfileDataset(ds: DatasetEntry) {
+  const canon = canonicalDataset(segLayerName(ds));
+  if (canon === activeDatasetCanon.value || switchingDatasetId.value) return;
+  switchingDatasetId.value = ds.id;
+  const ok = await switchToDataset(ds);
+  if (ok) refreshActiveDatasetCanon();
+  switchingDatasetId.value = null;
+}
+
+function datasetContribution(ds: DatasetEntry): DatasetContribution | undefined {
+  return datasetStats.value[canonicalDataset(segLayerName(ds))];
+}
+
+function hasContributed(ds: DatasetEntry): boolean {
+  const c = datasetContribution(ds);
+  return !!c && (c.edits > 0 || c.completions > 0 || c.helpRequests > 0);
+}
 
 // ── Inline flag picker ────────────────────────────────────────────────────────
 // All country flags A-Z (ISO 3166-1 alpha-2, sorted alphabetically)
@@ -278,7 +440,12 @@ function statForTrack(track: BadgeTrack): number {
 
 function isBadgeEarned(badge: BadgeDefinition): boolean {
   if (badge.threshold === 0) return false;
-  return statForTrack(badge.track) >= badge.threshold;
+  if (statForTrack(badge.track) >= badge.threshold) return true;
+  // Persisted earn: once crossed, a badge stays earned even if the stat later
+  // drops. myBadgeAwards is the CURRENT user's, so only apply it to own profile.
+  if (!viewingOtherUser.value && badge.id != null &&
+      backendStore.myBadgeAwards.has(`${badge.track}:${badge.id}`)) return true;
+  return false;
 }
 
 function onBadgeClick(badge: BadgeDefinition) {
@@ -332,6 +499,15 @@ const favoriteSpecialBadge = computed(() => {
 });
 /** Badge shown in the Trophy Case featured banner. */
 const featuredBadge = computed(() => selectedBadge.value ?? favoriteBadge.value ?? latestEarnedBadge.value);
+
+/** Mobile: tapping the featured badge art opens it fullscreen with a
+ *  simplified award animation (Amy 2026-08-18: the banner cannot do the
+ *  badge justice on a phone). Desktop taps are inert. */
+const badgeZoom = ref<{ img: string; name: string; desc?: string; meta?: string } | null>(null);
+function zoomBadge(img?: string | null, name?: string | null, desc?: string | null, meta?: string | null) {
+  if (!isMobileRef.value || !img) return;
+  badgeZoom.value = { img, name: name || 'Award', desc: desc || undefined, meta: meta || undefined };
+}
 function toggleFavoriteBadge(badge: BadgeDefinition) {
   const newSlug = favoriteBadgeSlug.value === badge.slug ? '' : badge.slug;
   backendStore.saveFavoriteBadge(newSlug);
@@ -514,11 +690,11 @@ const emit = defineEmits({hide: null, 'open-settings': null});
     :class="{ 'nge-profile-closing': closing }"
     @hide="handleClose"
   >
-    <div class="nge-profile-shell" :class="{ 'nge-profile-shell--trophy': activeTab === 'trophyCase', 'nge-profile-shell--admin': activeTab === 'adminHub' }">
+    <div ref="shellEl" class="nge-profile-shell" :class="{ 'nge-profile-shell--trophy': activeTab === 'trophyCase', 'nge-profile-shell--admin': activeTab === 'adminHub', 'nge-profile-shell--week': activeTab === 'weekInScience', 'nge-profile-shell--datasets': activeTab === 'datasets', 'nge-profile-shell--settings': activeTab === 'settings' }">
 
       <!-- ── Topbar ─────────────────────────────────────────── -->
       <div class="nge-profile-topbar">
-        <span class="nge-profile-topbar-label">◈ RESEARCHER PROFILE</span>
+        <span class="nge-profile-topbar-label">◈ <span class="nge-profile-topbar-name">{{ profileUsername || profileName }}</span> · RESEARCHER PROFILE</span>
         <button class="nge-profile-exit" @click="handleClose">×</button>
       </div>
 
@@ -537,9 +713,24 @@ const emit = defineEmits({hide: null, 'open-settings': null});
         <button
           v-if="!viewingOtherUser"
           class="nge-profile-tab"
-          :class="{ 'nge-profile-tab--active': activeTab === 'weekInScience' }"
+          :class="{ 'nge-profile-tab--active': activeTab === 'datasets' }"
+          @click="activeTab = 'datasets'"
+        >🧬 Datasets</button>
+        <!-- Hidden by default (Amy 2026-08-11): the tab button only appears
+             while you're ON it, i.e. arrived via the toolbar Week icon or a
+             recap notification deep-link. -->
+        <button
+          v-if="!viewingOtherUser && activeTab === 'weekInScience'"
+          class="nge-profile-tab"
+          :class="{ 'nge-profile-tab--active': true }"
           @click="openWeekInScience()"
         >📊 My Week in Science</button>
+        <button
+          v-if="!viewingOtherUser"
+          class="nge-profile-tab"
+          :class="{ 'nge-profile-tab--active': activeTab === 'settings' }"
+          @click="activeTab = 'settings'"
+        >⚙️ Settings</button>
         <button
           v-if="!viewingOtherUser && backendStore.isAdmin"
           class="nge-profile-tab"
@@ -589,7 +780,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               <div class="nge-profile-name">{{ profileName }}</div>
 
               <button v-if="!viewingOtherUser" class="nge-profile-edit-btn"
-                      @click="emit('open-settings')"
+                      @click="activeTab = 'settings'"
                       title="Edit Profile — set bio, flag, and more">⚙</button>
             </div>
 
@@ -605,7 +796,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
             <template v-if="!viewingOtherUser">
               <div class="nge-profile-bio" v-if="prefs.bio">{{ prefs.bio }}</div>
-              <button v-else class="nge-profile-bio-add" @click="emit('open-settings')">
+              <button v-else class="nge-profile-bio-add" @click="activeTab = 'settings'">
                 + Add a bio
               </button>
             </template>
@@ -621,7 +812,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 {label:'All Time', val:profileStats.editsAllTime,  merges:profileStats.mergesAllTime,  splits:profileStats.splitsAllTime},
               ]" :key="i">
                 <div class="nge-profile-stat-label">{{ col.label }}</div>
-                <div class="nge-profile-stat-val">{{ col.val.toLocaleString() }}</div>
+                <div class="nge-profile-stat-val"><RollUp :value="col.val" /></div>
                 <div class="nge-profile-stat-breakdown">
                   <span class="nge-profile-stat-bp" title="Merges">
                     <svg class="nge-profile-stat-icon nge-profile-stat-icon--merge" viewBox="0 0 16 16" fill="none">
@@ -652,28 +843,46 @@ const emit = defineEmits({hide: null, 'open-settings': null});
           <!-- Cells stats -->
           <div v-if="!viewingOtherUser" class="nge-profile-section nge-profile-section--cells">
             <div class="nge-profile-section-label">▌ Cells</div>
-            <div class="nge-profile-stat-row">
-              <div class="nge-profile-stat-col">
+            <!-- Sub-label row removed (Amy): tooltips carry the definitions,
+                 and each stat sits in its own highlighted tile. -->
+            <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
+              <div class="nge-profile-stat-col nge-profile-stat-tile" title="Cells you proofread all the way to completion">
                 <div class="nge-profile-stat-label">Completed</div>
                 <div class="nge-profile-stat-val nge-profile-stat-val--hero">
-                  {{ completedCells.length.toLocaleString() }}
+                  <RollUp :value="completedCells.length" />
                 </div>
-                <div class="nge-profile-stat-sub">proofread</div>
               </div>
-              <div class="nge-profile-stat-col">
+              <div class="nge-profile-stat-col nge-profile-stat-tile" title="Cells you identified (typed) without proofreading edits">
                 <div class="nge-profile-stat-label">Identified</div>
-                <div class="nge-profile-stat-val">{{ identifiedCells.length.toLocaleString() }}</div>
-                <div class="nge-profile-stat-sub">typed only</div>
+                <div class="nge-profile-stat-val"><RollUp :value="identifiedCells.length" /></div>
               </div>
-              <div class="nge-profile-stat-col">
+              <div class="nge-profile-stat-col nge-profile-stat-tile" title="Every cell you have worked on in any way">
                 <div class="nge-profile-stat-label">Total</div>
-                <div class="nge-profile-stat-val">{{ filteredCellHistory.length.toLocaleString() }}</div>
-                <div class="nge-profile-stat-sub">touched</div>
+                <div class="nge-profile-stat-val"><RollUp :value="filteredCellHistory.length" /></div>
               </div>
-              <div class="nge-profile-stat-col" v-if="playerAssists > 0">
+              <div class="nge-profile-stat-col nge-profile-stat-tile" v-if="playerAssists > 0" title="Cells where you helped answer another player's request">
                 <div class="nge-profile-stat-label">Assists</div>
                 <div class="nge-profile-stat-val" style="color: #7f8;">{{ playerAssists }}</div>
-                <div class="nge-profile-stat-sub">helped</div>
+              </div>
+            </div>
+
+            <!-- Scout Report: tags placed and fixed -->
+            <div class="nge-profile-section-label" style="margin-top: 14px;">▌ Scout Report</div>
+            <div class="nge-profile-stat-row">
+              <div class="nge-profile-stat-col">
+                <div class="nge-profile-stat-label">Tags Placed</div>
+                <div class="nge-profile-stat-val" style="color: #f5d142;"><RollUp :value="myTagsPlaced.length" /></div>
+                <div class="nge-profile-stat-sub">scouted</div>
+              </div>
+              <div class="nge-profile-stat-col">
+                <div class="nge-profile-stat-label">Confirmed</div>
+                <div class="nge-profile-stat-val"><RollUp :value="myTagsFixed.length" /></div>
+                <div class="nge-profile-stat-sub">of yours, fixed</div>
+              </div>
+              <div class="nge-profile-stat-col">
+                <div class="nge-profile-stat-label">You Fixed</div>
+                <div class="nge-profile-stat-val" style="color: #9d9;"><RollUp :value="tagsIFixed.length" /></div>
+                <div class="nge-profile-stat-sub">scythe work</div>
               </div>
             </div>
 
@@ -1093,6 +1302,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               :src="selectedSpecialBadge.badge?.image_url || selectedSpecialBadge.badge?.thumbnail_url"
               :alt="selectedSpecialBadge.badge?.name"
               class="nge-trophy-featured-icon nge-trophy-featured-icon--animated"
+              @click="zoomBadge(selectedSpecialBadge.badge?.image_url || selectedSpecialBadge.badge?.thumbnail_url, selectedSpecialBadge.badge?.name, selectedSpecialBadge.badge?.description, 'Won on ' + formatDate(selectedSpecialBadge.awarded_at))"
             />
             <div class="nge-trophy-featured-info">
               <div class="nge-trophy-featured-name nge-trophy-featured-name--scifi">{{ selectedSpecialBadge.badge?.name || 'Award' }}</div>
@@ -1124,6 +1334,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               :src="favoriteSpecialBadge.badge?.image_url || favoriteSpecialBadge.badge?.thumbnail_url"
               :alt="favoriteSpecialBadge.badge?.name"
               class="nge-trophy-featured-icon nge-trophy-featured-icon--animated"
+              @click="zoomBadge(favoriteSpecialBadge.badge?.image_url || favoriteSpecialBadge.badge?.thumbnail_url, favoriteSpecialBadge.badge?.name, favoriteSpecialBadge.badge?.description, 'Won on ' + formatDate(favoriteSpecialBadge.awarded_at))"
             />
             <div class="nge-trophy-featured-info">
               <div class="nge-trophy-featured-name nge-trophy-featured-name--scifi">{{ favoriteSpecialBadge.badge?.name || 'Award' }}</div>
@@ -1155,6 +1366,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               :alt="featuredBadge.name"
               class="nge-trophy-featured-icon nge-trophy-featured-icon--animated"
               :class="`nge-badge--${featuredBadge.slug}`"
+              @click="zoomBadge(getBadgeUrl(featuredBadge.imageKey), featuredBadge.name, featuredBadge.description, 'Unlocked at ' + featuredBadge.threshold.toLocaleString() + ' ' + thresholdLabel(featuredBadge))"
             />
             <div class="nge-trophy-featured-info">
               <div class="nge-trophy-featured-name nge-trophy-featured-name--scifi">{{ featuredBadge.name }}</div>
@@ -1242,6 +1454,45 @@ const emit = defineEmits({hide: null, 'open-settings': null});
         </div>
       </div><!-- end Trophy Case -->
 
+      <!-- ── Datasets tab: contributions per dataset + switcher ── -->
+      <div v-if="activeTab === 'datasets'" class="nge-profile-body nge-profile-body--datasets">
+        <div class="nge-ds-tab-intro">
+          Your contributions across datasets. Click one to switch the viewer to it.
+        </div>
+        <div v-if="datasetStatsLoading && !Object.keys(datasetStats).length" class="nge-ds-tab-loading">
+          Counting your edits…
+        </div>
+        <div class="nge-ds-tab-grid">
+          <div
+            v-for="ds in DATASETS"
+            :key="ds.id"
+            class="nge-ds-tab-card"
+            :class="{
+              'nge-ds-tab-card--active': canonicalDataset(segLayerName(ds)) === activeDatasetCanon,
+              'nge-ds-tab-card--switching': switchingDatasetId === ds.id,
+            }"
+            @click="switchProfileDataset(ds)"
+          >
+            <div class="nge-ds-tab-card-head">
+              <span class="nge-ds-tab-species">{{ SPECIES_ICONS[ds.species] }}</span>
+              <span class="nge-ds-tab-label">{{ ds.label }}</span>
+              <span v-if="canonicalDataset(segLayerName(ds)) === activeDatasetCanon" class="nge-ds-tab-badge">Active</span>
+              <span v-else class="nge-ds-tab-switch">Switch ▸</span>
+            </div>
+            <div class="nge-ds-tab-desc">{{ ds.description }}</div>
+            <div class="nge-ds-tab-stats">
+              <template v-if="datasetContribution(ds)">
+                <span class="nge-ds-tab-stat"><b>{{ (datasetContribution(ds)?.edits ?? 0).toLocaleString() }}</b> edits</span>
+                <span class="nge-ds-tab-stat"><b>{{ (datasetContribution(ds)?.completions ?? 0).toLocaleString() }}</b> cells proofread</span>
+                <span class="nge-ds-tab-stat"><b>{{ (datasetContribution(ds)?.helpRequests ?? 0).toLocaleString() }}</b> help requests</span>
+                <span v-if="!hasContributed(ds)" class="nge-ds-tab-stat nge-ds-tab-stat--none">no contributions yet</span>
+              </template>
+              <span v-else class="nge-ds-tab-stat nge-ds-tab-stat--none">…</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ── Week in Science tab ───────────────────────────────── -->
       <div v-if="activeTab === 'weekInScience'" class="nge-profile-body nge-profile-body--week">
         <WeeklyRecapPanel embedded />
@@ -1249,7 +1500,12 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
       <!-- ── Admin Hub tab ─────────────────────────────────────── -->
       <div v-if="activeTab === 'adminHub'" class="nge-profile-body nge-profile-body--admin">
-        <AdminHub />
+        <AdminHub :initial-sub-tab="adminInitialSubTab" />
+      </div>
+
+      <!-- ── Settings tab ──────────────────────────────────────── -->
+      <div v-if="activeTab === 'settings'" class="nge-profile-body nge-profile-body--settings">
+        <SettingsPanel embedded />
       </div>
 
       <!-- ── All Special Awards modal ── -->
@@ -1276,6 +1532,22 @@ const emit = defineEmits({hide: null, 'open-settings': null});
       </div>
 
     </div>
+
+    <!-- Mobile fullscreen badge viewer: tap the featured badge art to see
+         it big, with a simplified award moment. Tap anywhere to close. -->
+    <teleport to="body">
+      <transition name="nge-bz">
+        <div v-if="badgeZoom" class="nge-badge-zoom" @click="badgeZoom = null">
+          <div class="nge-badge-zoom-halo"></div>
+          <div class="nge-badge-zoom-ring"></div>
+          <img :src="badgeZoom.img" :alt="badgeZoom.name" class="nge-badge-zoom-img" />
+          <div class="nge-badge-zoom-name">{{ badgeZoom.name }}</div>
+          <div v-if="badgeZoom.desc" class="nge-badge-zoom-desc">{{ badgeZoom.desc }}</div>
+          <div v-if="badgeZoom.meta" class="nge-badge-zoom-meta">{{ badgeZoom.meta }}</div>
+          <div class="nge-badge-zoom-hint">Tap anywhere to close</div>
+        </div>
+      </transition>
+    </teleport>
   </modal-overlay>
 </template>
 
@@ -1375,7 +1647,13 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 .nge-profile-shell {
   display: flex;
   flex-direction: column;
-  max-height: 90vh;
+  /* Never taller than the viewport, whatever a tab's content does. The
+     plain 90vh clamp still let content escape on short windows because
+     ModalOverlay's overlay-content is overflow: visible; the hard cap plus
+     overflow hidden means nothing can render past the shell edge, and each
+     tab body scrolls internally. */
+  max-height: min(90vh, calc(100vh - 32px));
+  overflow: hidden;
   transition: width 0.25s ease;
 }
 .nge-profile-shell--trophy {
@@ -1385,6 +1663,117 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 .nge-profile-shell--admin {
   width: 720px;
   max-width: 90vw;
+}
+/* Give Week in Science a real, consistent width instead of letting the shell
+   shrink to the recap's old fixed content width (which read as a tiny box). */
+.nge-profile-shell--week {
+  width: 720px;
+  max-width: 90vw;
+}
+.nge-profile-shell--datasets {
+  width: 640px;
+  max-width: 90vw;
+}
+.nge-profile-shell--settings {
+  width: 520px;
+  max-width: 90vw;
+}
+.nge-profile-body--settings {
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Datasets tab ── */
+.nge-profile-body--datasets {
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 18px 22px 26px;
+  gap: 12px;
+}
+.nge-ds-tab-intro {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.nge-ds-tab-loading {
+  font-size: 12px;
+  color: rgba(100, 200, 255, 0.7);
+}
+.nge-ds-tab-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.nge-ds-tab-card {
+  position: relative;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.nge-ds-tab-card:hover:not(.nge-ds-tab-card--active) {
+  background: rgba(100, 200, 255, 0.06);
+  border-color: rgba(100, 200, 255, 0.2);
+}
+.nge-ds-tab-card--active {
+  background: rgba(100, 200, 255, 0.1);
+  border-color: rgba(100, 200, 255, 0.4);
+  cursor: default;
+}
+.nge-ds-tab-card--switching {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.nge-ds-tab-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nge-ds-tab-species { font-size: 16px; line-height: 1; }
+.nge-ds-tab-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  flex: 1;
+}
+.nge-ds-tab-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64c8ff;
+  background: rgba(100, 200, 255, 0.12);
+  padding: 1px 7px;
+  border-radius: 3px;
+  letter-spacing: 0.03em;
+}
+.nge-ds-tab-switch {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+.nge-ds-tab-card:hover .nge-ds-tab-switch { color: #64c8ff; }
+.nge-ds-tab-desc {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 4px 0 8px 24px;
+  line-height: 1.35;
+}
+.nge-ds-tab-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-left: 24px;
+}
+.nge-ds-tab-stat {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.nge-ds-tab-stat b {
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 600;
+}
+.nge-ds-tab-stat--none {
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
 }
 
 /* ── Topbar ── */
@@ -1405,6 +1794,12 @@ const emit = defineEmits({hide: null, 'open-settings': null});
   text-transform: uppercase;
   font-weight: 600;
 }
+/* Whose profile this is, visible on every tab. */
+.nge-profile-topbar-name {
+  color: #f5d142;
+  text-transform: none;
+  letter-spacing: 0.1em;
+}
 
 .nge-profile-exit {
   background: none; border: none;
@@ -1422,6 +1817,10 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 /* ── Shared column base ── */
 .nge-profile-col {
   overflow-y: auto;
+  /* macOS hides overlay scrollbars until you scroll, which made a clipped
+     column and a scrollable one look identical. A slim always-there thumb
+     says "there's more". */
+  scrollbar-gutter: stable;
   padding: 20px 24px 32px;
   box-sizing: border-box;
   scrollbar-width: thin;
@@ -1457,7 +1856,12 @@ const emit = defineEmits({hide: null, 'open-settings': null});
   align-items: center;
   justify-content: flex-start;
   background: rgba(74, 158, 255, 0.015);
-  overflow: hidden;
+  /* Was overflow: hidden, which silently clipped Favorite Badge / Top of the
+     Week on short windows while the sibling columns scrolled (the recurring
+     "a rule was written but never applied" trap, in reverse: a rule applied
+     that never should have been). */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -1919,10 +2323,22 @@ const emit = defineEmits({hide: null, 'open-settings': null});
   margin-bottom: 10px;
 }
 
+/* Badges sit smaller, five to a row, on faint shelf lines (Amy: "laid out
+   as though they were set in 2 rows on a shelf"). The shelf is a repeating
+   gradient tuned to the fixed row height plus the row gap. */
 .nge-profile-badges-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px 8px;
+  grid-auto-rows: 78px;
+  padding: 0 2px;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px 74px,
+    rgba(130, 190, 255, 0.30) 74px 75px,
+    rgba(130, 190, 255, 0.08) 75px 77px,
+    transparent 77px 90px
+  );
 }
 
 .nge-profile-badge {
@@ -1984,8 +2400,8 @@ const emit = defineEmits({hide: null, 'open-settings': null});
   transform: scale(1.08);
 }
 .nge-profile-badge-viewall-icon {
-  width: 68px;
-  height: 68px;
+  width: 46px;
+  height: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2020,6 +2436,29 @@ const emit = defineEmits({hide: null, 'open-settings': null});
   border-color: rgba(245, 166, 35, 0.45);
 }
 
+/* Cells as highlighted tiles: each stat in its own softly lit card, even
+   spacing, definitions on hover (the old sub-label row is gone). */
+.nge-profile-stat-row--tiles {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.nge-profile-stat-tile {
+  flex: 1 1 0;
+  min-width: 86px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(74, 158, 255, 0.055);
+  border: 1px solid rgba(74, 158, 255, 0.16);
+  cursor: help;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+.nge-profile-stat-tile:hover {
+  background: rgba(74, 158, 255, 0.1);
+  border-color: rgba(74, 158, 255, 0.35);
+  transform: translateY(-1px);
+}
+
 .nge-profile-right-divider {
   height: 1px;
   margin: 18px 20px;
@@ -2028,11 +2467,11 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
 .nge-profile-badge-img {
   display: flex; align-items: center; justify-content: center;
-  width: 68px; height: 68px;
+  width: 46px; height: 46px;
   transition: filter 0.15s;
 }
 
-.nge-profile-badge-icon { width: 62px; height: 62px; object-fit: contain; }
+.nge-profile-badge-icon { width: 42px; height: 42px; object-fit: contain; }
 
 .nge-profile-badge-mystery {
   width: 50px; height: 50px;
@@ -2075,8 +2514,13 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 /* Badge detail in viz column */
 .nge-profile-viz-badge { justify-content: flex-start; text-align: center; gap: 12px; padding-top: 16px; }
 
-.nge-profile-viz-badge-icon { width: 220px; height: 220px; object-fit: contain; filter: drop-shadow(0 0 20px rgba(74,158,255,0.4)); }
-.nge-profile-viz-badge-icon--large { width: 240px; height: 240px; }
+/* max-width guards: the right column is 360px, and anything wider walked
+   off its right edge (Amy's clipped Favorite Badge report, 2026-08-17). */
+.nge-profile-viz-badge-icon { width: 220px; height: 220px; max-width: 100%; object-fit: contain; filter: drop-shadow(0 0 20px rgba(74,158,255,0.4)); }
+.nge-profile-viz-badge-icon--large { width: 240px; height: 240px; max-width: 100%; }
+.nge-profile-viz-panel { max-width: 100%; box-sizing: border-box; }
+.nge-profile-viz-badge-name,
+.nge-profile-viz-badge-desc { max-width: 100%; overflow-wrap: break-word; padding: 0 10px; box-sizing: border-box; }
 
 .nge-profile-viz-badge-name {
   font-family: 'Orbitron', 'Rajdhani', 'Audiowide', 'Share Tech Mono', ui-monospace, monospace;
@@ -2765,6 +3209,9 @@ const emit = defineEmits({hide: null, 'open-settings': null});
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 14px;
   overflow-y: auto;
+  /* Always reserve the scrollbar's space so revealing it on hover doesn't
+     reflow the grid and resize every badge. */
+  scrollbar-gutter: stable;
   padding-right: 4px;
   scrollbar-width: thin;
   scrollbar-color: rgba(74, 158, 255, 0.2) transparent;
@@ -2800,4 +3247,121 @@ const emit = defineEmits({hide: null, 'open-settings': null});
   margin-top: 4px; line-height: 1.3;
   font-style: italic;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MOBILE FULLSCREEN BADGE VIEWER
+   Tap the featured badge art on a phone: the badge takes the whole screen
+   with a simplified award moment (bloom halo, one sweeping ring, springy
+   scale in). Tap anywhere to close.
+───────────────────────────────────────────────────────────────────────────── */
+.nge-badge-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 10600;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  box-sizing: border-box;
+  background: radial-gradient(ellipse at 50% 42%, rgba(20, 40, 80, 0.92), rgba(2, 5, 12, 0.97) 70%);
+  backdrop-filter: blur(8px);
+  text-align: center;
+}
+.nge-badge-zoom-halo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(90vw, 420px);
+  height: min(90vw, 420px);
+  transform: translate(-50%, -62%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(53, 181, 255, 0.28) 0%, rgba(53, 181, 255, 0.08) 45%, transparent 70%);
+  animation: nge-bz-halo 2.4s ease-out both;
+  pointer-events: none;
+}
+.nge-badge-zoom-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(74vw, 340px);
+  height: min(74vw, 340px);
+  transform: translate(-50%, -62%);
+  border-radius: 50%;
+  border: 1px solid rgba(53, 181, 255, 0.55);
+  border-top-color: rgba(191, 233, 255, 0.9);
+  box-shadow: 0 0 24px rgba(53, 181, 255, 0.35), inset 0 0 24px rgba(53, 181, 255, 0.12);
+  animation: nge-bz-ring 2.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  pointer-events: none;
+}
+.nge-badge-zoom-img {
+  width: min(64vw, 300px);
+  height: min(64vw, 300px);
+  object-fit: contain;
+  margin-bottom: 6px;
+  filter: drop-shadow(0 0 24px rgba(100, 180, 255, 0.55));
+  animation: nge-bz-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.nge-badge-zoom-name {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #f0f6ff;
+  text-shadow: 0 0 14px rgba(53, 181, 255, 0.6);
+  animation: nge-bz-rise 0.5s 0.15s ease-out both;
+}
+.nge-badge-zoom-desc {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #aebfdd;
+  max-width: 320px;
+  animation: nge-bz-rise 0.5s 0.25s ease-out both;
+}
+.nge-badge-zoom-meta {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  color: rgba(53, 181, 255, 0.85);
+  text-transform: uppercase;
+  animation: nge-bz-rise 0.5s 0.35s ease-out both;
+}
+.nge-badge-zoom-hint {
+  position: absolute;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: rgba(143, 166, 204, 0.6);
+  text-transform: uppercase;
+  animation: nge-bz-rise 0.5s 0.6s ease-out both;
+}
+
+@keyframes nge-bz-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+@keyframes nge-bz-rise {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes nge-bz-halo {
+  0%   { opacity: 0; transform: translate(-50%, -62%) scale(0.5); }
+  35%  { opacity: 1; }
+  100% { opacity: 0.75; transform: translate(-50%, -62%) scale(1); }
+}
+@keyframes nge-bz-ring {
+  0%   { opacity: 0; transform: translate(-50%, -62%) scale(0.45) rotate(0deg); }
+  30%  { opacity: 1; }
+  100% { opacity: 0.7; transform: translate(-50%, -62%) scale(1) rotate(200deg); }
+}
+
+.nge-bz-enter-active, .nge-bz-leave-active { transition: opacity 0.25s ease; }
+.nge-bz-enter-from, .nge-bz-leave-to { opacity: 0; }
+
+/* The featured art is a tap target on phones. */
+body.nge-mobile .nge-trophy-featured-icon { cursor: pointer; }
+
 </style>

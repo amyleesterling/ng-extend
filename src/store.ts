@@ -8,9 +8,15 @@ import {cancellableFetchSpecialOk, parseSpecialUrl} from 'neuroglancer/util/spec
 import {responseJson} from 'neuroglancer/util/http_request';
 
 import {Config, EYEWIRE_II_CAVE_CONFIG, getDatasetCaveConfig} from './config';
+import {isMobileRef} from './util/mobile';
+import {currentDatasetTag, canonicalDataset, currentSegLayer} from './datasets';
 import {supabase} from './supabase';
 import {getRootsFromSupervoxels} from './widgets/pcg_service';
 import {SegmentationUserLayer} from "neuroglancer/segmentation_user_layer";
+import {makeLayer} from "neuroglancer/layer";
+import pinVtkUrl from '../static/tags/pin.vtk';
+import pinOtherVtkUrl from '../static/tags/pin-other.vtk';
+import scytheVtkUrl from '../static/tags/scythe.vtk';
 import {parsePositionString} from "neuroglancer/ui/default_clipboard_handling";
 import {Uint64} from "neuroglancer/util/uint64";
 
@@ -54,6 +60,17 @@ export const useLoginStore = defineStore('login', () => {
   }
 
   async function update() {
+    try {
+      await doUpdate();
+    } finally {
+      // The mobile welcome sheet holds its login section blank until the
+      // first token check settles, so this must flip true on every exit
+      // path — including the mid-loop early return and thrown errors.
+      checked.value = true;
+    }
+  }
+
+  async function doUpdate() {
     const localStorageKeys: string[] = [];
     for (const key of Object.keys(window.localStorage)) {
       if (key.startsWith(TOKEN_PREFIX)) {
@@ -115,7 +132,11 @@ export const useLoginStore = defineStore('login', () => {
     sessions.value = newSessions;
   }
   const sessions: Ref<loginSession[]> = ref([]);
-  return {sessions, update, logout};
+  /** True once the first update() has settled — before that, nobody knows
+   *  yet whether the stored tokens are valid, so UI shouldn't claim either
+   *  logged-in or logged-out. */
+  const checked = ref(false);
+  return {sessions, update, logout, checked};
 });
 
 export interface Volume {
@@ -165,8 +186,6 @@ export const useLayersStore = defineStore('layers', () => {
    * Heuristics:
    *   - segment count decreased → merge (fewer segments = segments were combined)
    *   - segment count increased → split or new selection
-   *
-   * Also increments cellsSubmitted every ~5 edits to animate the cell-dot canvas.
    */
   function watchSegmentEdits() {
     if (!viewer) return;
@@ -184,7 +203,6 @@ export const useLayersStore = defineStore('layers', () => {
     const visibleSegs = groupState.visibleSegments;
 
     let prevCount = visibleSegs.size;
-    let localEditAccum = 0;
     let pendingNetDiff = 0;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const pendingRemoved = new Set<string>(); // specific segments removed during this operation
@@ -299,11 +317,11 @@ export const useLayersStore = defineStore('layers', () => {
 
         statsStore.logDailyEdit(operation);
         statsStore.signalEdit(operation);
-        localEditAccum += 1;
-        if (localEditAccum >= 5) {
-          statsStore.setStats({ cellsSubmitted: statsStore.stats.cellsSubmitted + 1 });
-          localEditAccum = 0;
-        }
+        // NOTE: cellsSubmitted is deliberately NOT touched here. It used to
+        // be incremented every 5 edits "to animate the cell-dot canvas", but
+        // it's a real stat (the Exploration badge track and the profile's
+        // Cells number). It now comes only from CAVE completions
+        // (users.cells_completed via cave_completions_mirror).
 
         // Log to Supabase with diff=1 (one operation per debounce)
         try {
@@ -339,7 +357,36 @@ export const useLayersStore = defineStore('layers', () => {
     // set default values in settings
     viewer.chunkQueueManager.capacities.gpuMemory.sizeLimit.value = 2e9;
     viewer.chunkQueueManager.capacities.systemMemory.sizeLimit.value = 3e9;
-    viewer.layout.restoreState('xy-3d');
+    // Mobile defaults to fullscreen 3D (Amy 2026-08-18): split screen is
+    // reachable only from a share link that carries its own layout or the
+    // corner view toggle. A layout named in the URL hash wins on any device.
+    if (isMobileRef.value) {
+      // Captured ONCE at boot, before neuroglancer starts mirroring the
+      // full state (which always contains "layout") back into the hash.
+      // Only an inline share link, whose hash carries a literal layout key
+      // at page load, keeps its own view; everything else on a phone is
+      // fullscreen 3D, including curated dataset states that arrive later
+      // as #!url pointers (their remote fetch resolves after the hash has
+      // been rewritten, so the hash cannot be consulted at restore time).
+      const bootHadExplicitLayout = window.location.hash.includes('layout');
+      if (!bootHadExplicitLayout) {
+        viewer.layout.restoreState('3d');
+      }
+      const origRestore = viewer.state.restoreState.bind(viewer.state);
+      (viewer.state as any).restoreState = (obj: any) => {
+        if (obj && typeof obj === 'object' && !Array.isArray(obj) &&
+            !bootHadExplicitLayout) {
+          if ((obj as any).layout !== undefined) obj = {...obj, layout: '3d'};
+          // The seg side panel also stays closed on phones.
+          if ((obj as any).selectedLayer !== undefined) {
+            obj = {...obj, selectedLayer: {...(obj as any).selectedLayer, visible: false}};
+          }
+        }
+        origRestore(obj);
+      };
+    } else {
+      viewer.layout.restoreState('xy-3d');
+    }
 
     viewer.layerManager.layersChanged.add(refreshLayers);
     refreshLayers();
@@ -393,6 +440,15 @@ export const useLayersStore = defineStore('layers', () => {
       const hashPart = hashIdx >= 0 ? dsCfgEarly.defaultStateUrl.slice(hashIdx) : '';
       console.info(`[layers] Loading curated view for ${targetSegName} → ${dsCfgEarly.defaultStateUrl}`);
       if (hashPart) {
+        // Reload-loop guard: if the hash ALREADY points at the curated state,
+        // reloading again cannot help. Without this, a curated state that
+        // fails to load (e.g. middleauth not granted in this browser) left
+        // activeLayers empty, the boot auto-select called selectLayers again,
+        // and the page reloaded forever.
+        if (window.location.hash === hashPart) {
+          console.warn('[layers] curated state already in hash but layers empty — not reloading again');
+          return;
+        }
         window.location.hash = hashPart;
         // Force a reload so all layers/state are re-initialized cleanly from the saved URL.
         window.location.reload();
@@ -514,6 +570,8 @@ export const useLayersStore = defineStore('layers', () => {
       const {url: fetchUrl, credentialsProvider} = parseSpecialUrl(url, defaultCredentialsManager);
       const response = await cancellableFetchSpecialOk(credentialsProvider, fetchUrl, {}, responseJson);
       // Set layout first to avoid localPositionValid crashes during layout transitions
+      // Mobile: curated views open fullscreen 3D like everything else.
+      if (isMobileRef.value) response.layout = '3d';
       if (response.layout) {
         const layoutName = typeof response.layout === 'string'
           ? response.layout
@@ -760,13 +818,24 @@ export interface UserPreferences {
   bio: string;    // free-text, capped at 280 chars in the UI
   /** Which toolbar icons to show, in order. Empty = show all defaults. */
   toolbarIcons: string[];
+  /** Icon ids that have already been auto-injected into this user's saved
+   *  order (icons added after their prefs were first saved). Lets
+   *  resolveToolbarOrder tell "pref predates the icon" apart from "user
+   *  deliberately removed it", so removals stick. */
+  toolbarIconsInjected?: string[];
   /** Mute chat: skip the green unread pip on the toolbar. Defaults
    *  to false (notifications on) when the key isn't set yet. */
   chatMuted?: boolean;
+  /** Mute help requests: hide the pending count on the Second Opinion toolbar
+   *  icon. Defaults to false (badge shown) when the key isn't set yet. */
+  helpMuted?: boolean;
+  /** Auto-show open scout tags on cells even when tag mode is closed.
+   *  Defaults to true (ambient dots on); tag mode always shows them. */
+  showScoutTags?: boolean;
 }
 
 export const useUserPreferencesStore = defineStore('userPrefs', () => {
-  const prefs: Ref<UserPreferences> = ref({ flag: '', bio: '', toolbarIcons: [], chatMuted: false });
+  const prefs: Ref<UserPreferences> = ref({ flag: '', bio: '', toolbarIcons: [], chatMuted: false, helpMuted: false });
 
   function load() {
     try {
@@ -959,18 +1028,11 @@ export const useCellHistoryStore = defineStore('cellHistory', () => {
       }
     }
 
-    // Select the segment in the first segmentation layer
+    // Select the segment in the ACTIVE segmentation layer. Dataset switches
+    // leave the old layer archived in managedLayers, and "first seg layer"
+    // used to add the root to that archived layer instead.
     try {
-      const segLayer = viewer.layerManager.managedLayers.find(
-        (x: any) => {
-          const layer = x.layer;
-          if (!layer) return false;
-          const className = layer.constructor?.name || '';
-          return className.includes('Segmentation') ||
-            layer.type === 'segmentation' ||
-            x.initialSpecification?.type === 'segmentation';
-        },
-      );
+      const segLayer = currentSegLayer();
       if (!segLayer?.layer) {
         console.warn('[cellHistory] No segmentation layer found');
       } else {
@@ -1063,14 +1125,38 @@ export interface HelpRequest {
   userName?: string;
   /** Display name of the user who resolved this request */
   resolvedByName?: string;
-  /** Response note from the resolver */
-  responseNote?: string;
-  /** Optional link (e.g. neuroglancer state URL) from the resolver */
-  responseUrl?: string;
-  /** Optional annotation layer name referenced by the resolver */
-  responseAnnotationLayer?: string;
   /** Public URL of an attached screenshot (Firebase Storage). */
   screenshotUrl?: string;
+  /** Thread of replies from the help_responses child table. Each reply keeps its
+   *  OWN url / annotation layer / screenshot, so links accumulate instead of
+   *  overwriting (the legacy response_* columns overwrote on every reply). */
+  responses?: HelpResponse[];
+}
+
+export interface HelpResponse {
+  id: string;
+  userId?: string;
+  userName?: string;
+  note?: string;
+  url?: string;
+  annotationLayer?: string;
+  screenshotUrl?: string;
+  resolved?: boolean;
+  createdAt: string;
+}
+
+function rowToHelpResponse(row: any): HelpResponse {
+  return {
+    id: row.id,
+    userId: row.user_id ?? undefined,
+    userName: row.user_name ?? undefined,
+    note: row.note ?? undefined,
+    url: row.url ?? undefined,
+    annotationLayer: row.annotation_layer ?? undefined,
+    screenshotUrl: row.screenshot_url ?? undefined,
+    resolved: !!row.resolved,
+    createdAt: row.created_at,
+  };
 }
 
 /** Map Supabase row → HelpRequest interface */
@@ -1089,9 +1175,6 @@ function rowToHelpRequest(row: any): HelpRequest {
     userId: row.user_id ?? undefined,
     userName: row.user_name ?? undefined,
     resolvedByName: row.resolved_by_name ?? undefined,
-    responseNote: row.response_note ?? undefined,
-    responseUrl: row.response_url ?? undefined,
-    responseAnnotationLayer: row.response_annotation_layer ?? undefined,
     screenshotUrl: row.screenshot_url ?? undefined,
     annotationLayer: row.annotation_layer ?? undefined,
   };
@@ -1119,11 +1202,92 @@ export const useHelpRequestStore = defineStore('helpRequests', () => {
         loadFromLocalStorage(); // fallback
         return;
       }
-      requests.value = (data ?? []).map(rowToHelpRequest);
+      const reqs = (data ?? []).map(rowToHelpRequest);
+      // Attach each request's reply thread from the help_responses child table.
+      // Best-effort: if the query fails, requests still load, just without
+      // their reply threads.
+      try {
+        const ids = reqs.map(r => r.id);
+        if (ids.length) {
+          const { data: resp } = await supabase
+            .from('help_responses')
+            .select('*')
+            .in('request_id', ids)
+            .order('created_at', { ascending: true });
+          const byReq = new Map<string, HelpResponse[]>();
+          for (const row of resp ?? []) {
+            const list = byReq.get(row.request_id) ?? [];
+            list.push(rowToHelpResponse(row));
+            byReq.set(row.request_id, list);
+          }
+          for (const r of reqs) r.responses = byReq.get(r.id) ?? [];
+        }
+      } catch (e) {
+        console.warn('[helpRequests] responses load failed:', e);
+      }
+      requests.value = reqs;
       refreshPending();
     } catch (e) {
       console.warn('[helpRequests] load failed, falling back to localStorage:', e);
       loadFromLocalStorage();
+    }
+  }
+
+  /**
+   * Add a reply to a help request as its own row in help_responses (so links /
+   * screenshots accumulate). Optionally resolves the thread. Replaces the old
+   * respond()/resolve() single-column writes for new replies.
+   */
+  async function addResponse(id: string, payload: {
+    note?: string; url?: string; annotationLayer?: string;
+    screenshotUrl?: string; resolve?: boolean;
+  }) {
+    const backend = useProofreadingBackendStore();
+    const responderName = backend.chatHandle || backend.userName || backend.userEmail?.split('@')[0] || 'Anonymous';
+    const row = {
+      request_id: id,
+      user_id: backend.userId || null,
+      user_name: responderName,
+      note: payload.note || null,
+      url: payload.url || null,
+      annotation_layer: payload.annotationLayer || null,
+      screenshot_url: payload.screenshotUrl || null,
+      resolved: !!payload.resolve,
+    };
+    const { data: inserted, error: insErr } = await supabase
+      .from('help_responses').insert(row).select('*').single();
+    if (insErr) { console.warn('[helpRequests] addResponse error:', insErr.message); return; }
+
+    if (payload.resolve) {
+      const { error: updErr } = await supabase.from('help_requests').update({
+        resolved: true,
+        resolved_at: new Date().toISOString(),
+        resolved_by: backend.userId || null,
+        resolved_by_name: responderName,
+      }).eq('id', id);
+      if (updErr) console.warn('[helpRequests] resolve-on-response error:', updErr.message);
+    }
+
+    // Optimistic local update
+    const r = requests.value.find(x => x.id === id);
+    if (r) {
+      r.responses = [...(r.responses ?? []), rowToHelpResponse(inserted)];
+      if (payload.resolve) { r.resolved = true; r.resolvedByName = responderName; }
+    }
+    refreshPending();
+
+    // Notify the requester that someone replied (skip self-replies).
+    if (r?.userId && r.userId !== backend.userId) {
+      const note = payload.note || (payload.screenshotUrl ? 'attached a screenshot' : '');
+      const notePreview = note.slice(0, 120) + (note.length > 120 ? '...' : '');
+      await supabase.from('notifications').insert({
+        title: `💬 Response to your help request`,
+        body: `${responderName} responded on ${r.segId}: ${notePreview}`,
+        target_type: 'user',
+        target_id: r.userId,
+        send_at: new Date().toISOString(),
+        created_by: backend.userId,
+      }).then(({ error: e }) => { if (e) console.warn('[helpRequests] notification error:', e.message); });
     }
   }
 
@@ -1161,6 +1325,8 @@ export const useHelpRequestStore = defineStore('helpRequests', () => {
         const updated = rowToHelpRequest(payload.new);
         const idx = requests.value.findIndex(r => r.id === updated.id);
         if (idx >= 0) {
+          // The row payload has no reply thread — keep the one already loaded.
+          updated.responses = requests.value[idx].responses;
           requests.value[idx] = updated;
           refreshPending();
         }
@@ -1185,7 +1351,7 @@ export const useHelpRequestStore = defineStore('helpRequests', () => {
       position: JSON.stringify(req.position),
       note: req.note || '',
       issue_type: req.issueType,
-      dataset: req.dataset || 'eyewire_ii',
+      dataset: req.dataset || currentDatasetTag(),
       cell_type: req.cellType || null,
       nickname: req.nickname || null,
       screenshot_url: req.screenshotUrl || null,
@@ -1217,33 +1383,20 @@ export const useHelpRequestStore = defineStore('helpRequests', () => {
     refreshPending();
   }
 
-  /** Mark a help request as resolved in Supabase, optionally with a response. */
-  async function resolve(id: string, response?: { note?: string; url?: string; annotationLayer?: string; appendToExisting?: boolean }) {
+  /** Mark a help request as resolved in Supabase. Replies (with notes, links,
+   *  screenshots) go through addResponse(); this only flips the thread flag. */
+  async function resolve(id: string) {
     const backend = useProofreadingBackendStore();
     const resolverName = backend.userName || backend.userEmail?.split('@')[0] || 'Anonymous';
-    const updateData: Record<string, any> = {
-      resolved: true,
-      resolved_at: new Date().toISOString(),
-      resolved_by: backend.userId || null,
-      resolved_by_name: resolverName,
-    };
-    if (response?.note) {
-      if (response.appendToExisting) {
-        const { data } = await supabase.from('help_requests').select('response_note').eq('id', id).single();
-        const existing = data?.response_note || '';
-        updateData.response_note = existing
-          ? `${existing}\n---\n${resolverName}: ${response.note}`
-          : response.note;
-      } else {
-        updateData.response_note = response.note;
-      }
-    }
-    if (response?.url) updateData.response_url = response.url;
-    if (response?.annotationLayer) updateData.response_annotation_layer = response.annotationLayer;
 
     const { error } = await supabase
       .from('help_requests')
-      .update(updateData)
+      .update({
+        resolved: true,
+        resolved_at: new Date().toISOString(),
+        resolved_by: backend.userId || null,
+        resolved_by_name: resolverName,
+      })
       .eq('id', id);
 
     if (error) {
@@ -1254,70 +1407,8 @@ export const useHelpRequestStore = defineStore('helpRequests', () => {
     if (r) {
       r.resolved = true;
       r.resolvedByName = resolverName;
-      if (response?.note) r.responseNote = response.note;
-      if (response?.url) r.responseUrl = response.url;
-      if (response?.annotationLayer) r.responseAnnotationLayer = response.annotationLayer;
     }
     refreshPending();
-  }
-
-  /** Add a response to a help request WITHOUT resolving it. */
-  async function respond(id: string, response: { note?: string; url?: string; annotationLayer?: string; appendToExisting?: boolean }) {
-    const backend = useProofreadingBackendStore();
-    const responderName = backend.userName || backend.userEmail?.split('@')[0] || 'Anonymous';
-
-    // If appending to an existing thread, fetch current note from DB to avoid overwrites
-    let finalNote = response.note || '';
-    if (response.appendToExisting && response.note) {
-      const { data } = await supabase
-        .from('help_requests')
-        .select('response_note')
-        .eq('id', id)
-        .single();
-      const existing = data?.response_note || '';
-      if (existing) {
-        finalNote = `${existing}\n---\n${responderName}: ${response.note}`;
-      }
-    }
-
-    const updateData: Record<string, any> = {};
-    // Only set resolved_by_name if there's no existing response (don't overwrite original responder)
-    if (!response.appendToExisting) {
-      updateData.resolved_by_name = responderName;
-    }
-    if (finalNote) updateData.response_note = finalNote;
-    if (response.url) updateData.response_url = response.url;
-    if (response.annotationLayer) updateData.response_annotation_layer = response.annotationLayer;
-
-    const { error } = await supabase
-      .from('help_requests')
-      .update(updateData)
-      .eq('id', id);
-
-    if (error) {
-      console.warn('[helpRequests] respond error:', error.message);
-    }
-    // Optimistic update
-    const r = requests.value.find(x => x.id === id);
-    if (r) {
-      if (!response.appendToExisting) r.resolvedByName = responderName;
-      if (finalNote) r.responseNote = finalNote;
-      if (response.url) r.responseUrl = response.url;
-      if (response.annotationLayer) r.responseAnnotationLayer = response.annotationLayer;
-    }
-
-    // Send notification to the requester
-    if (r?.userId && r.userId !== backend.userId) {
-      const notePreview = (response.note || '').slice(0, 120) + ((response.note || '').length > 120 ? '...' : '');
-      await supabase.from('notifications').insert({
-        title: `💬 Response to your help request`,
-        body: `${responderName} responded on ${r.segId}: ${notePreview}`,
-        target_type: 'user',
-        target_id: r.userId,
-        send_at: new Date().toISOString(),
-        created_by: backend.userId,
-      }).then(({ error: e }) => { if (e) console.warn('[helpRequests] notification error:', e.message); });
-    }
   }
 
   /** Remove a help request (delete from Supabase). */
@@ -1338,7 +1429,778 @@ export const useHelpRequestStore = defineStore('helpRequests', () => {
   load();
   subscribe();
 
-  return { requests, pending, add, resolve, respond, remove, refreshPending, load, subscribe, unsubscribe };
+  return { requests, pending, add, resolve, addResponse, remove, refreshPending, load, subscribe, unsubscribe };
+});
+
+// ── Issue Tags (Scout tags) ────────────────────────────────────────────────
+// One-click typed flags dropped at the crosshair: 'merger' (two cells wrongly
+// joined) or 'missing_branch' (branch looks truncated). Scythes work the open
+// queue from the Cell Library Tags tab. Backed by `issue_tags`.
+
+export type IssueTagType = 'merger' | 'missing_branch' | 'other';
+
+/** Merger subtypes, Amy's taxonomy. 'hairball' is real EyeWire slang. */
+export type IssueTagSubtype = 'snip' | 'hairball' | 'twins' | 'debris';
+
+export interface IssueTag {
+  id: string;
+  dataset?: string;
+  segId?: string;
+  position: number[];
+  tagType: IssueTagType;
+  subtype?: IssueTagSubtype;
+  annotationLayer?: string;
+  screenshotUrl?: string;
+  note?: string;
+  userId?: string;
+  userName?: string;
+  status: 'open' | 'resolved';
+  resolvedById?: string;
+  resolvedByName?: string;
+  createdAt: string;
+  /** When the tag was resolved (issue_tags.resolved_at). */
+  resolvedAt?: string;
+  /** 'human' (default) or 'model' for AI-seeded candidates. */
+  source?: string;
+  /** Model verify probability (0..1), set on source 'model' tags. */
+  confidence?: number;
+  /** Model payload for the proposed-split overlay (import-model-tags.mjs). */
+  modelData?: {
+    windowIdx?: number;
+    batch?: string;
+    /** Window center in microns (the model's native space). */
+    centerUm?: number[];
+    /** 25 sample points in microns relative to centerUm. */
+    posRelUm?: number[][];
+    /** 0/1 per sample point: which side of the proposed cut it falls on. */
+    labels?: number[];
+    spectralScore?: number;
+    /** Future model taxonomy hook; drives the category icon in the AI tab. */
+    category?: string;
+  };
+}
+
+/** AI-seeded candidate (imported from the merge-error detection model). */
+export function isModelTag(t: IssueTag): boolean {
+  return t.source === 'model';
+}
+
+function rowToIssueTag(row: any): IssueTag {
+  return {
+    id: row.id,
+    dataset: row.dataset ?? undefined,
+    segId: row.segment_id ?? undefined,
+    position: (() => { try { return JSON.parse(row.position); } catch { return [0, 0, 0]; } })(),
+    tagType: row.tag_type,
+    subtype: row.subtype ?? undefined,
+    annotationLayer: row.annotation_layer ?? undefined,
+    screenshotUrl: row.screenshot_url ?? undefined,
+    note: row.note ?? undefined,
+    userId: row.user_id ?? undefined,
+    userName: row.user_name ?? undefined,
+    status: row.status ?? 'open',
+    resolvedById: row.resolved_by ?? undefined,
+    resolvedByName: row.resolved_by_name ?? undefined,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at ?? undefined,
+    source: row.source ?? 'human',
+    confidence: row.confidence ?? undefined,
+    modelData: row.model_data ?? undefined,
+  };
+}
+
+export const useIssueTagStore = defineStore('issueTags', () => {
+  const tags = ref<IssueTag[]>([]);
+  let realtimeChannel: any = null;
+
+  const openTags = computed(() => tags.value.filter(t => t.status === 'open'));
+
+  /** Name of the in-viewer annotation layer that mirrors open tags. */
+  const TAG_LAYER_NAME = '⚑ Scout tags';
+  const PIN_LAYER_NAME = '⚑ Scout pins';
+
+  // ── Amy's Meshy 3D pin, planted at every open tag ────────────────────────
+  // static/tags/pin.obj: tip at origin, 3um tall, nm units, body toward -y.
+  // Instances are baked into ONE combined OBJ served as a data: URL (our
+  // neuroglancer fork's parseUrl accepts data:), so the layer bar carries a
+  // single "Scout pins" chip however many pins are planted.
+  interface PinMesh { verts: Float32Array; faces: number[][]; colors: string[] }
+  /** Parse one of our colored legacy-VTK pin assets (POINTS / POLYGONS /
+   *  POINT_DATA SCALARS color float 3). Colors stay as raw text lines,
+   *  they're pasted straight back out per instance. */
+  function parsePinVtk(text: string): PinMesh | null {
+    const lines = text.split('\n');
+    const verts: number[] = [];
+    const faces: number[][] = [];
+    const colors: string[] = [];
+    let i = 0;
+    const n = lines.length;
+    while (i < n && !lines[i].startsWith('POINTS')) i++;
+    if (i >= n) return null;
+    const nv = parseInt(lines[i].split(/\s+/)[1], 10);
+    i++;
+    for (let k = 0; k < nv && i < n; k++, i++) {
+      const p = lines[i].trim().split(/\s+/);
+      verts.push(+p[0], +p[1], +p[2]);
+    }
+    while (i < n && !lines[i].startsWith('POLYGONS')) i++;
+    if (i >= n) return null;
+    const nf = parseInt(lines[i].split(/\s+/)[1], 10);
+    i++;
+    for (let k = 0; k < nf && i < n; k++, i++) {
+      const p = lines[i].trim().split(/\s+/);
+      faces.push([+p[1], +p[2], +p[3]]);
+    }
+    while (i < n && !lines[i].startsWith('LOOKUP_TABLE')) i++;
+    i++;
+    for (let k = 0; k < nv && i < n; k++, i++) colors.push(lines[i].trim());
+    if (!verts.length || !faces.length || colors.length !== nv) return null;
+    return {verts: Float32Array.from(verts), faces, colors};
+  }
+
+  let pinMeshCache: Promise<{main: PinMesh; other: PinMesh | null; scythe: PinMesh | null} | null> | null = null;
+  function loadPinMeshes() {
+    if (!pinMeshCache) {
+      pinMeshCache = Promise.all([fetch(pinVtkUrl), fetch(pinOtherVtkUrl), fetch(scytheVtkUrl)]).then(async ([r1, r2, r3]) => {
+        if (!r1.ok) return null;
+        const main = parsePinVtk(await r1.text());
+        if (!main) return null;
+        const other = r2.ok ? parsePinVtk(await r2.text()) : null;
+        const scythe = r3.ok ? parsePinVtk(await r3.text()) : null;
+        return {main, other, scythe};
+      }).catch(() => null);
+    }
+    return pinMeshCache;
+  }
+
+  /** Deterministic small yaw per tag id, so a cluster of pins reads like
+   *  flags planted by different hands rather than clones. */
+  function pinYaw(id: string): number {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+    return ((h % 628) / 628) * 2 * Math.PI;
+  }
+
+  /** Type tints: blue Cut, green Extend, purple Other (Amy's palette). */
+  function pinTint(tagType?: string): [number, number, number] | null {
+    if (tagType === 'merger') return [0.21, 0.71, 1.0];
+    if (tagType === 'missing_branch') return [0.38, 0.88, 0.50];
+    if (tagType === 'other') return [0.78, 0.59, 1.0];
+    return null;
+  }
+
+  /** Colorize a mesh's baked vertex colors with a type tint: the bake's
+   *  luminance keeps the sculpt's shading, the tint carries the meaning.
+   *  Cached per mesh + tint. */
+  const tintedColorCache = new Map<string, string[]>();
+  function tintedColors(mesh: PinMesh, tint: [number, number, number] | null): string[] {
+    if (!tint) return mesh.colors;
+    const cacheKey = mesh.colors.length + ':' + tint.join(',');
+    const hit = tintedColorCache.get(cacheKey);
+    if (hit) return hit;
+    const out = mesh.colors.map(line => {
+      const p = line.split(/\s+/);
+      const lum = 0.3 * (+p[0]) + 0.59 * (+p[1]) + 0.11 * (+p[2]);
+      const k = 0.35 + 0.75 * lum;
+      return `${Math.min(1, tint[0] * k).toFixed(3)} ${Math.min(1, tint[1] * k).toFixed(3)} ${Math.min(1, tint[2] * k).toFixed(3)}`;
+    });
+    tintedColorCache.set(cacheKey, out);
+    return out;
+  }
+
+  /** Bake all pin instances (possibly different meshes per tag type) into
+   *  one colored legacy-VTK, so the layer bar carries a single chip and the
+   *  paint Meshy baked survives as per-vertex color. */
+  function buildPinVtk(instances: {mesh: PinMesh; pos: number[]; yaw: number; lift: number; tint?: [number, number, number] | null}[]): string {
+    let totalV = 0, totalF = 0;
+    for (const inst of instances) { totalV += inst.mesh.verts.length / 3; totalF += inst.mesh.faces.length; }
+    const lines: string[] = [
+      '# vtk DataFile Version 3.0', 'nge scout pins', 'ASCII', 'DATASET POLYDATA',
+      `POINTS ${totalV} float`,
+    ];
+    for (const inst of instances) {
+      const {verts} = inst.mesh;
+      const nv = verts.length / 3;
+      const c = Math.cos(inst.yaw), s = Math.sin(inst.yaw);
+      for (let i = 0; i < nv; i++) {
+        const x = verts[i * 3], y = verts[i * 3 + 1], z = verts[i * 3 + 2];
+        const rx = x * c + z * s, rz = -x * s + z * c;
+        lines.push(`${(rx + inst.pos[0]).toFixed(0)} ${(y + inst.pos[1] - inst.lift).toFixed(0)} ${(rz + inst.pos[2]).toFixed(0)}`);
+      }
+    }
+    lines.push(`POLYGONS ${totalF} ${totalF * 4}`);
+    let off = 0;
+    for (const inst of instances) {
+      for (const f of inst.mesh.faces) lines.push(`3 ${f[0] + off} ${f[1] + off} ${f[2] + off}`);
+      off += inst.mesh.verts.length / 3;
+    }
+    lines.push(`POINT_DATA ${totalV}`, 'SCALARS color float 3', 'LOOKUP_TABLE default');
+    for (const inst of instances) for (const c of tintedColors(inst.mesh, inst.tint ?? null)) lines.push(c);
+    return lines.join('\n');
+  }
+
+  const MAX_PINS = 30;
+  let lastPinKey = '';
+  async function syncPinLayer(
+      viewer: any,
+      tagPoints: {id: string; point: number[]; tagType?: string}[], preview: number[] | null) {
+    try {
+      const removePins = () => {
+        const managed = viewer.layerManager?.managedLayers?.find((l: any) => l.name === PIN_LAYER_NAME);
+        if (managed) viewer.layerManager.removeManagedLayer(managed);
+        lastPinKey = '';
+      };
+      if (!tagPoints.length && !preview) { removePins(); return; }
+
+      // Voxel -> nm using the viewer's global coordinate space.
+      const cs = viewer.coordinateSpace?.value;
+      if (!cs?.scales?.length) return;
+      const scaleNm = [0, 1, 2].map(i => cs.scales[i] * 1e9);
+      const toNm = (p: number[]) => [p[0] * scaleNm[0], p[1] * scaleNm[1], p[2] * scaleNm[2]];
+
+      const shown = tagPoints.slice(0, MAX_PINS);
+      if (tagPoints.length > MAX_PINS) {
+        console.info(`[issueTags] pin layer capped at ${MAX_PINS} of ${tagPoints.length} tags`);
+      }
+      const key = JSON.stringify(shown.map(t => [t.id, t.tagType ?? '', t.point.map(Math.round)])
+        .concat(preview ? [['preview', '', preview.map(Math.round)]] : []));
+      const existing = viewer.layerManager?.managedLayers?.find((l: any) => l.name === PIN_LAYER_NAME);
+      if (key === lastPinKey && existing) return;
+
+      const meshes = await loadPinMeshes();
+      if (!meshes) return;
+      // Amy 2026-08-17: Cut tags plant Grim's crossed scythes in their
+      // natural metal colors (the shape carries the meaning); Extend and
+      // Other plant the simple location icon tinted green / purple. The
+      // castle pin stays shipped for future use.
+      const pinMesh = meshes.other ?? meshes.main;
+      const meshFor = (tagType?: string) =>
+        (tagType === 'merger' && meshes.scythe) ? meshes.scythe : pinMesh;
+      const tintFor = (tagType?: string) =>
+        (tagType === 'merger' && meshes.scythe) ? null : pinTint(tagType);
+      const instances = shown.map(t => ({
+        mesh: meshFor(t.tagType), pos: toNm(t.point), yaw: pinYaw(t.id), lift: 0,
+        tint: tintFor(t.tagType),
+      }));
+      // The pending pin hovers half a micron above its point until Submit
+      // plants it, a placed-but-not-saved tag literally hasn't landed yet.
+      if (preview) instances.push({
+        mesh: meshFor(previewType), pos: toNm(preview), yaw: 0, lift: 500, tint: tintFor(previewType),
+      });
+
+      const vtkText = buildPinVtk(instances);
+      const dataUrl = 'data:application/octet-stream;base64,' + btoa(vtkText);
+      const spec = {
+        type: 'mesh',
+        source: 'vtk://' + dataUrl,
+        name: PIN_LAYER_NAME,
+        // Per-vertex baked colors from the Meshy texture.
+        shader: 'void main() { emitRGB(color); }',
+      };
+      // Replace non-disruptively: only this layer is touched, never the
+      // full viewer state (the restoreState route made segments vanish).
+      if (existing) viewer.layerManager.removeManagedLayer(existing);
+      const managed = makeLayer(viewer.layerSpecification, PIN_LAYER_NAME, spec);
+      // NEVER serialize this layer: its source is a multi-hundred-KB data:
+      // URL, and letting it into the state JSON bloated the URL hash on
+      // every state change and broke state restoration (Amy's
+      // localPositionValid crash). It is derived data, rebuilt from
+      // Supabase on every load. A null spec means "do not serialize".
+      (managed as any).toJSON = () => null;
+      viewer.layerSpecification.add(managed);
+      lastPinKey = key;
+    } catch (e) {
+      console.warn('[issueTags] pin layer sync failed:', e);
+    }
+  }
+
+  /**
+   * Mirror the current dataset's OPEN tags into a local annotation layer so
+   * they're visible in 2D and 3D.
+   *
+   * The layer is CREATED once via the state-JSON route (one-time, when tag
+   * mode first opens); every later change mutates the layer's
+   * localAnnotations IN PLACE. The first version restored the whole viewer
+   * state on every tag drop, which re-specced the graphene layer and made
+   * the 3D segments blink out (Amy: "T+click makes the 3D seg go away").
+   */
+  function tagPointAnnotations() {
+    const canon = currentDatasetTag();
+    return openTags.value
+      .filter(t => !isModelTag(t))
+      // Strict: unstamped legacy tags do NOT render in every dataset.
+      .filter(t => !!t.dataset && canonicalDataset(t.dataset) === canon)
+      .filter(t => t.position?.length === 3)
+      .map(t => ({
+        id: t.id,
+        point: t.position,
+        tagType: t.tagType,
+        description: `${t.tagType === 'merger' ? 'Cut' : t.tagType === 'missing_branch' ? 'Extend' : 'Other'}${t.note ? ': ' + t.note : ''} (${t.userName || 'anon'})`,
+      }));
+  }
+
+  /** A placed-but-not-submitted point, shown in the layer so "Place by
+   *  click" gives visible feedback without saving anything yet. */
+  let previewPoint: number[] | null = null;
+  let previewType: string | undefined;
+  function setTagPreview(pos: number[] | null, tagType?: string) {
+    previewPoint = pos && pos.length === 3 ? [...pos] : null;
+    previewType = tagType;
+    syncTagLayer();
+  }
+
+  /** True while the tag mode panel is open; the panel always shows the
+   *  layer, whatever the ambient showScoutTags preference says. */
+  const tagModeActive = ref(false);
+  function setTagModeActive(v: boolean) {
+    tagModeActive.value = v;
+    syncTagLayer();
+  }
+
+  function syncTagLayer() {
+    syncAiLayer();
+    try {
+      const viewer: any = (window as any)['viewer'];
+      if (!viewer?.state) return;
+      // Ambient display is a preference (default on); tag mode overrides.
+      const ambientOn = useUserPreferencesStore().prefs.showScoutTags !== false;
+      if (!tagModeActive.value && !ambientOn) {
+        for (const name of [TAG_LAYER_NAME, PIN_LAYER_NAME]) {
+          const stale = viewer.layerManager?.managedLayers?.find((l: any) => l.name === name);
+          if (stale) viewer.layerManager.removeManagedLayer(stale);
+        }
+        lastPinKey = '';
+        return;
+      }
+      const tagPoints = tagPointAnnotations();
+      void syncPinLayer(viewer, tagPoints, previewPoint);
+      const points: { id: string; point: number[]; description: string }[] = [...tagPoints];
+      if (previewPoint) {
+        points.push({ id: 'nge-tag-preview', point: previewPoint, description: 'Pending tag, hit Submit' });
+      }
+      const managed = viewer.layerManager?.managedLayers?.find((l: any) => l.name === TAG_LAYER_NAME);
+
+      // Subtle guide dots: the 3D pins are the tag's face (Amy: the big
+      // blue dots were covering the cool 3D icons). Small and translucent,
+      // they mark the spot in the 2D panes and whisper in the projection.
+      const TAG_SHADER = 'void main() {\n' +
+        '  setColor(vec4(0.21, 0.71, 1.0, 0.55));\n' +
+        '  setPointMarkerSize(7.0);\n' +
+        '  setPointMarkerBorderWidth(1.0);\n' +
+        '  setPointMarkerBorderColor(vec4(0.85, 0.97, 1.0, 0.5));\n' +
+        '}\n';
+
+      if (!managed) {
+        if (!points.length) return;
+        // One-time creation through the state route. Later updates never
+        // touch the full state again.
+        const state = viewer.state.toJSON();
+        state.layers = [...(state.layers ?? []), {
+          type: 'annotation',
+          name: TAG_LAYER_NAME,
+          annotations: points.map(p => ({ ...p, type: 'point' })),
+          annotationColor: '#35b5ff',
+          shader: TAG_SHADER,
+        }];
+        viewer.state.restoreState(state);
+        return;
+      }
+
+      // In-place update: clear + re-add on the layer's local source.
+      const userLayer: any = managed.layer;
+      // Layers created before the shader existed get it retrofitted here.
+      try {
+        const shaderState = userLayer?.annotationDisplayState?.shader;
+        if (shaderState && shaderState.value !== TAG_SHADER) shaderState.restoreState(TAG_SHADER);
+      } catch {}
+      const src = userLayer?.localAnnotations;
+      if (!src) return;
+      src.clear();
+      for (const p of points) {
+        src.add({ id: p.id, type: 0 /* AnnotationType.POINT */, point: Float32Array.from(p.point), properties: [], description: p.description }, true);
+      }
+    } catch (e) {
+      console.warn('[issueTags] tag layer sync failed:', e);
+    }
+  }
+
+  // ── AI candidates (model-seeded tags) ────────────────────────────────────
+  // Suspect windows from the merge-error detection model render on their own
+  // layer, tinted by confidence: cool blue near the model's 0.2 threshold up
+  // to hot orange at 1.0. Zoomed out the layer reads as a heat map of trouble
+  // spots; each marker is still an individual candidate.
+
+  const AI_LAYER_NAME = '🤖 AI candidates';
+  // Amy's palette: cool blue (#4a9eff, the app accent) rising to golden
+  // yellow (#FFD700) at full confidence. Orange is banned.
+  // Hollow rings, not discs: a filled marker sits exactly on top of the
+  // error it points at (Amy: "the markers are covering up the spot").
+  const AI_SHADER = 'void main() {\n' +
+    '  float c = clamp((prop_conf() - 0.2) / 0.8, 0.0, 1.0);\n' +
+    '  vec3 cold = vec3(0.29, 0.62, 1.0);\n' +
+    '  vec3 hot = vec3(1.0, 0.84, 0.0);\n' +
+    '  setColor(vec4(mix(cold, hot, c), 0.08));\n' +
+    '  setPointMarkerSize(11.0 + 8.0 * c);\n' +
+    '  setPointMarkerBorderWidth(2.5);\n' +
+    '  setPointMarkerBorderColor(vec4(mix(cold, hot, c), 0.95));\n' +
+    '}\n';
+
+  /** AI tab's layer toggle; ambient showScoutTags still gates everything. */
+  const aiLayerOn = ref(true);
+  function setAiLayerOn(v: boolean) {
+    aiLayerOn.value = v;
+    syncAiLayer();
+  }
+
+  function aiPointAnnotations() {
+    const canon = currentDatasetTag();
+    return openTags.value
+      .filter(isModelTag)
+      .filter(t => !t.dataset || canonicalDataset(t.dataset) === canon)
+      .filter(t => t.position?.length === 3)
+      .map(t => ({
+        id: t.id,
+        point: t.position,
+        conf: t.confidence ?? 1,
+        description: `AI candidate ${Math.round((t.confidence ?? 1) * 100)}%${t.segId ? ' on …' + t.segId.slice(-6) : ''}`,
+      }));
+  }
+
+  function removeLayerByName(viewer: any, name: string) {
+    const managed = viewer.layerManager?.managedLayers?.find((l: any) => l.name === name);
+    if (managed) viewer.layerManager.removeManagedLayer(managed);
+  }
+
+  /** Non-disruptive annotation layer creation (same route as the pin layer:
+   *  only this layer is touched, never the full viewer state). */
+  function addAnnotationLayer(viewer: any, name: string, spec: any) {
+    const managed = makeLayer(viewer.layerSpecification, name, spec);
+    viewer.layerSpecification.add(managed);
+  }
+
+  function syncAiLayer() {
+    try {
+      const viewer: any = (window as any)['viewer'];
+      if (!viewer?.state) return;
+      const ambientOn = useUserPreferencesStore().prefs.showScoutTags !== false;
+      const points = aiPointAnnotations();
+      if (!aiLayerOn.value || !ambientOn || !points.length) {
+        removeLayerByName(viewer, AI_LAYER_NAME);
+        removeLayerByName(viewer, AI_CRYSTAL_LAYER_NAME);
+        lastCrystalKey = '';
+        return;
+      }
+      syncAiCrystals(viewer, points);
+      const managed = viewer.layerManager?.managedLayers?.find((l: any) => l.name === AI_LAYER_NAME);
+      // A layer resurrected from the URL state carries whatever shader it was
+      // saved with; retrofit the current one (same trick as the tag layer).
+      try {
+        const shaderState = (managed?.layer as any)?.annotationDisplayState?.shader;
+        if (shaderState && shaderState.value !== AI_SHADER) shaderState.restoreState(AI_SHADER);
+      } catch {}
+      if (!managed) {
+        addAnnotationLayer(viewer, AI_LAYER_NAME, {
+          type: 'annotation',
+          name: AI_LAYER_NAME,
+          annotationProperties: [{ id: 'conf', type: 'float32', default: 1 }],
+          annotations: points.map(p => ({
+            id: p.id, point: p.point, type: 'point', description: p.description, props: [p.conf],
+          })),
+          shader: AI_SHADER,
+        });
+        return;
+      }
+      const src = (managed.layer as any)?.localAnnotations;
+      if (!src) return;
+      src.clear();
+      for (const p of points) {
+        src.add({ id: p.id, type: 0 /* AnnotationType.POINT */, point: Float32Array.from(p.point), properties: [p.conf], description: p.description }, true);
+      }
+    } catch (e) {
+      console.warn('[issueTags] AI layer sync failed:', e);
+    }
+  }
+
+  // ── Golden shards: the candidates' 3D presence ───────────────────────────
+  // Circles carry the 2D cross-sections (where the color ramp reads); in the
+  // 3D projection each candidate is a faceted golden shard, an elongated
+  // octahedron sized by confidence, all instances baked into ONE combined
+  // OBJ served as a data: URL, the same trick as the scout pins.
+  const AI_CRYSTAL_LAYER_NAME = '🔶 AI shards';
+  let lastCrystalKey = '';
+  function syncAiCrystals(viewer: any, points: { id: string; point: number[]; conf: number }[]) {
+    try {
+      if (!points.length) {
+        removeLayerByName(viewer, AI_CRYSTAL_LAYER_NAME);
+        lastCrystalKey = '';
+        return;
+      }
+      const cs = viewer.coordinateSpace?.value;
+      if (!cs?.scales?.length) return;
+      const scaleNm = [0, 1, 2].map(i => cs.scales[i] * 1e9);
+      const inst = points.map(p => ({
+        pos: [p.point[0] * scaleNm[0], p.point[1] * scaleNm[1], p.point[2] * scaleNm[2]],
+        r: 500 + 900 * Math.max(0, Math.min(1, p.conf)),
+      }));
+      const key = JSON.stringify(inst.map(i =>
+        [Math.round(i.pos[0]), Math.round(i.pos[1]), Math.round(i.pos[2]), Math.round(i.r)]));
+      const existing = viewer.layerManager?.managedLayers?.find((l: any) => l.name === AI_CRYSTAL_LAYER_NAME);
+      if (key === lastCrystalKey && existing) return;
+
+      const lines: string[] = [];
+      for (const it of inst) {
+        // Hover the shard ABOVE its point like the scout pins do: centered
+        // on the spot it hides exactly what it marks.
+        const [x, yRaw, z] = it.pos, r = it.r;
+        const y = yRaw - 2.6 * r;
+        lines.push(
+          `v ${(x + r).toFixed(0)} ${y.toFixed(0)} ${z.toFixed(0)}`,
+          `v ${(x - r).toFixed(0)} ${y.toFixed(0)} ${z.toFixed(0)}`,
+          `v ${x.toFixed(0)} ${(y + 1.7 * r).toFixed(0)} ${z.toFixed(0)}`,
+          `v ${x.toFixed(0)} ${(y - 1.7 * r).toFixed(0)} ${z.toFixed(0)}`,
+          `v ${x.toFixed(0)} ${y.toFixed(0)} ${(z + r).toFixed(0)}`,
+          `v ${x.toFixed(0)} ${y.toFixed(0)} ${(z - r).toFixed(0)}`);
+      }
+      inst.forEach((_, k) => {
+        const o = k * 6;
+        for (const f of [[1, 3, 5], [3, 2, 5], [2, 4, 5], [4, 1, 5], [3, 1, 6], [2, 3, 6], [4, 2, 6], [1, 4, 6]]) {
+          lines.push(`f ${f[0] + o} ${f[1] + o} ${f[2] + o}`);
+        }
+      });
+      const dataUrl = 'data:application/octet-stream;base64,' + btoa(lines.join('\n'));
+      // Replace non-disruptively, like the pins: only this layer is touched.
+      if (existing) viewer.layerManager.removeManagedLayer(existing);
+      const managed = makeLayer(viewer.layerSpecification, AI_CRYSTAL_LAYER_NAME, {
+        type: 'mesh',
+        source: 'obj://' + dataUrl,
+        name: AI_CRYSTAL_LAYER_NAME,
+        shader: 'void main() { emitRGB(vec3(1.0, 0.84, 0.25)); }',
+      });
+      viewer.layerSpecification.add(managed);
+      lastCrystalKey = key;
+    } catch (e) {
+      console.warn('[issueTags] AI shard layer sync failed:', e);
+    }
+  }
+
+  // ── Dense heat layer (all model windows for one neuron) ──────────────────
+  // Every window the model scored, suspect or not, as a continuous heat skin
+  // along the neuron. Toggled per neuron from the AI tab; data comes from the
+  // model_windows table.
+
+  const HEAT_SHADER = 'void main() {\n' +
+    '  float c = clamp(prop_conf(), 0.0, 1.0);\n' +
+    '  vec3 cold = vec3(0.2, 0.45, 1.0);\n' +
+    '  vec3 hot = vec3(1.0, 0.84, 0.0);\n' +
+    '  setColor(vec4(mix(cold, hot, c), 0.25 + 0.7 * c));\n' +
+    '  setPointMarkerSize(4.0 + 9.0 * c);\n' +
+    '}\n';
+
+  function heatLayerName(rootId: string) {
+    return `🔥 AI heat …${rootId.slice(-6)}`;
+  }
+
+  /** Roots whose heat layer is currently shown (drives the AI tab chips). */
+  const activeHeatRoots = ref<string[]>([]);
+  const heatLoadingRoot = ref<string | null>(null);
+
+  async function toggleHeatLayer(rootId: string) {
+    const viewer: any = (window as any)['viewer'];
+    if (!viewer?.state) return;
+    const name = heatLayerName(rootId);
+    if (activeHeatRoots.value.includes(rootId)) {
+      removeLayerByName(viewer, name);
+      activeHeatRoots.value = activeHeatRoots.value.filter(r => r !== rootId);
+      return;
+    }
+    heatLoadingRoot.value = rootId;
+    try {
+      const canon = currentDatasetTag();
+      // Supabase caps a query at 1000 rows; a neuron can have several
+      // thousand windows, so page through.
+      const rows: any[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('model_windows')
+          .select('position, verify_prob, is_suspect, window_idx')
+          .eq('dataset', canon)
+          .eq('root_id', rootId)
+          .order('window_idx', { ascending: true })
+          .range(from, from + 999);
+        if (error) { console.warn('[issueTags] model_windows load error:', error.message); break; }
+        rows.push(...(data ?? []));
+        if (!data || data.length < 1000) break;
+      }
+      if (!rows.length) return;
+      const annotations = rows.map(r => {
+        let point: number[];
+        try { point = JSON.parse(r.position); } catch { return null; }
+        return {
+          id: `heat-${rootId}-${r.window_idx}`,
+          point,
+          type: 'point',
+          description: `window ${r.window_idx}: ${(r.verify_prob * 100).toFixed(1)}%${r.is_suspect ? ' SUSPECT' : ''}`,
+          props: [r.verify_prob],
+        };
+      }).filter(Boolean);
+      removeLayerByName(viewer, name);
+      addAnnotationLayer(viewer, name, {
+        type: 'annotation',
+        name,
+        annotationProperties: [{ id: 'conf', type: 'float32', default: 0 }],
+        annotations,
+        shader: HEAT_SHADER,
+      });
+      activeHeatRoots.value = [...activeHeatRoots.value, rootId];
+    } finally {
+      heatLoadingRoot.value = null;
+    }
+  }
+
+  // ── Proposed-split overlay ───────────────────────────────────────────────
+  // A suspect window carries 25 sample points labeled 0/1: the model's
+  // proposed partition of the neuron at that spot. Shown as a two-color
+  // constellation so a Scythe sees the suggested cut before making it.
+
+  const SPLIT_LAYER_NAME = '✂ Proposed split';
+  const SPLIT_SHADER = 'void main() {\n' +
+    '  vec3 a = vec3(1.0, 0.35, 0.35);\n' +
+    '  vec3 b = vec3(0.3, 0.65, 1.0);\n' +
+    '  setColor(vec4(mix(a, b, clamp(prop_side(), 0.0, 1.0)), 0.95));\n' +
+    '  setPointMarkerSize(9.0);\n' +
+    '  setPointMarkerBorderWidth(1.0);\n' +
+    '  setPointMarkerBorderColor(vec4(1.0, 1.0, 1.0, 0.8));\n' +
+    '}\n';
+
+  /** Tag whose proposed split is currently overlaid (AI tab scissors chip). */
+  const activeSplitTagId = ref<string | null>(null);
+
+  function hideSplitOverlay() {
+    const viewer: any = (window as any)['viewer'];
+    if (viewer) removeLayerByName(viewer, SPLIT_LAYER_NAME);
+    activeSplitTagId.value = null;
+  }
+
+  function toggleSplitOverlay(tag: IssueTag) {
+    if (activeSplitTagId.value === tag.id) { hideSplitOverlay(); return; }
+    const viewer: any = (window as any)['viewer'];
+    const md = tag.modelData;
+    if (!viewer?.state || !md?.posRelUm?.length || !md.labels?.length || !md.centerUm) return;
+    try {
+      // Micron -> voxel via the viewer's own coordinate space, like the pins.
+      const cs = viewer.coordinateSpace?.value;
+      if (!cs?.scales?.length) return;
+      const scaleNm = [0, 1, 2].map(i => cs.scales[i] * 1e9);
+      const annotations = md.posRelUm.map((rel: number[], i: number) => ({
+        id: `split-${tag.id}-${i}`,
+        point: [0, 1, 2].map(d => (md.centerUm![d] + rel[d]) * 1000 / scaleNm[d]),
+        type: 'point',
+        description: `proposed side ${md.labels![i]}`,
+        props: [md.labels![i]],
+      }));
+      removeLayerByName(viewer, SPLIT_LAYER_NAME);
+      addAnnotationLayer(viewer, SPLIT_LAYER_NAME, {
+        type: 'annotation',
+        name: SPLIT_LAYER_NAME,
+        annotationProperties: [{ id: 'side', type: 'float32', default: 0 }],
+        annotations,
+        shader: SPLIT_SHADER,
+      });
+      activeSplitTagId.value = tag.id;
+    } catch (e) {
+      console.warn('[issueTags] split overlay failed:', e);
+    }
+  }
+
+  async function load() {
+    try {
+      const { data, error } = await supabase
+        .from('issue_tags')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1000);
+      if (error) { console.warn('[issueTags] load error:', error.message); return; }
+      tags.value = (data ?? []).map(rowToIssueTag);
+      syncTagLayer();
+    } catch (e) { console.warn('[issueTags] load failed:', e); }
+  }
+
+  /** Drop a tag at the given position (voxel coords for the active dataset). */
+  async function add(tag: { tagType: IssueTagType; position: number[]; segId?: string; note?: string;
+                            subtype?: IssueTagSubtype; annotationLayer?: string; screenshotUrl?: string }) {
+    const backend = useProofreadingBackendStore();
+    const row = {
+      dataset: currentDatasetTag(),
+      segment_id: tag.segId || null,
+      position: JSON.stringify(tag.position),
+      tag_type: tag.tagType,
+      subtype: tag.subtype || null,
+      annotation_layer: tag.annotationLayer || null,
+      screenshot_url: tag.screenshotUrl || null,
+      note: tag.note || null,
+      user_id: backend.userId || null,
+      user_name: backend.chatHandle || backend.userName || 'Anonymous',
+    };
+    const { data, error } = await supabase.from('issue_tags').insert(row).select().single();
+    if (error) { console.warn('[issueTags] insert error:', error.message); return null; }
+    const t = rowToIssueTag(data);
+    if (!tags.value.find(x => x.id === t.id)) tags.value.unshift(t);
+    syncTagLayer();
+    return t;
+  }
+
+  /** Mark a tag fixed. The resolver's name is shown on the resolved row. */
+  async function resolve(id: string) {
+    const backend = useProofreadingBackendStore();
+    const name = backend.chatHandle || backend.userName || 'Anonymous';
+    const { error } = await supabase.from('issue_tags').update({
+      status: 'resolved',
+      resolved_by: backend.userId || null,
+      resolved_by_name: name,
+      resolved_at: new Date().toISOString(),
+    }).eq('id', id);
+    if (error) { console.warn('[issueTags] resolve error:', error.message); return; }
+    const t = tags.value.find(x => x.id === id);
+    if (t) { t.status = 'resolved'; t.resolvedByName = name; }
+    syncTagLayer();
+  }
+
+  async function remove(id: string) {
+    const { error } = await supabase.from('issue_tags').delete().eq('id', id);
+    if (error) { console.warn('[issueTags] delete error:', error.message); }
+    tags.value = tags.value.filter(x => x.id !== id);
+    syncTagLayer();
+  }
+
+  function subscribe() {
+    if (realtimeChannel) return;
+    realtimeChannel = supabase
+      .channel('issue_tags_realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'issue_tags' }, (payload: any) => {
+        const t = rowToIssueTag(payload.new);
+        if (!tags.value.find(x => x.id === t.id)) tags.value.unshift(t);
+        syncTagLayer();
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'issue_tags' }, (payload: any) => {
+        const t = rowToIssueTag(payload.new);
+        const idx = tags.value.findIndex(x => x.id === t.id);
+        if (idx >= 0) tags.value[idx] = t;
+        syncTagLayer();
+      })
+      .subscribe();
+  }
+
+  load();
+  subscribe();
+  // The viewer boots asynchronously after the stores; without these retries
+  // nothing syncs the layers on a fresh page load, so they only ever came
+  // back via the URL state (stale shaders, no shards).
+  for (const ms of [2000, 5000, 10000]) setTimeout(syncTagLayer, ms);
+
+  return { tags, openTags, load, add, resolve, remove, syncTagLayer, setTagPreview, tagModeActive, setTagModeActive,
+           aiLayerOn, setAiLayerOn, syncAiLayer,
+           activeHeatRoots, heatLoadingRoot, toggleHeatLayer,
+           activeSplitTagId, toggleSplitOverlay, hideSplitOverlay };
 });
 
 // ── Working Links ─────────────────────────────────────────────────────────
@@ -2291,6 +3153,7 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
       // Check admin status + load special badges + favorite badge after user is synced
       await checkAdmin();
       await loadMySpecialBadges();
+      await loadMyBadgeAwards();
       await loadFavoriteBadge();
     } catch (e: any) {
       console.warn('[backend] User sync failed:', e.message);
@@ -2381,7 +3244,7 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
 
   // ── Task management ───────────────────────────────────────────────────
   /** Load tasks for a dataset, with optional status filter. */
-  async function loadTasks(dataset: string = 'eyewire_ii', statusFilter?: string) {
+  async function loadTasks(dataset: string = currentDatasetTag(), statusFilter?: string) {
     loading.value = true;
     error.value = '';
     try {
@@ -2567,7 +3430,7 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
         segment_after: entry.segment_after ?? null,
         coordinates: entry.coordinates ?? null,
         metadata: entry.metadata ?? null,
-        dataset: entry.dataset ?? 'eyewire_ii',
+        dataset: entry.dataset ?? currentDatasetTag(),
         success: entry.success ?? true,
       }).then(
         ({ error }) => { if (error) console.warn('[backend] edit_log insert failed:', error.message); },
@@ -2696,7 +3559,7 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
 
   // ── Import from Google Sheet (reuses parseCsv from queue store) ─────
   /** Batch-import tasks from a Google Sheet CSV into Supabase. */
-  async function importFromGoogleSheet(url: string, dataset: string = 'eyewire_ii') {
+  async function importFromGoogleSheet(url: string, dataset: string = currentDatasetTag()) {
     loading.value = true;
     error.value = '';
     try {
@@ -3059,7 +3922,7 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
           .from('proofreading_tasks')
           .insert({
             segment_id: currentSegId || '',
-            dataset: 'eyewire_ii',
+            dataset: currentDatasetTag(),
             status: 'pending',
             claim_point_x: point[0],
             claim_point_y: point[1],
@@ -3077,7 +3940,7 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
       if (ok) {
         const local = tasks.value.find(t => t.id === task!.id);
         if (local) { local.status = 'assigned'; local.assigned_to = userId.value; }
-        await loadTasks('eyewire_ii');
+        await loadTasks();
         const label = currentSegId ? `...${currentSegId.slice(-4)}` : pointKey(point);
         await postActivity(`claimed cell ${label}`);
         return { ok: true };
@@ -3101,7 +3964,7 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
     activeTaskId.value = task.id;
     await releaseTask();
     activeTaskId.value = prevActive;
-    await loadTasks('eyewire_ii');
+    await loadTasks();
     return true;
   }
 
@@ -3116,7 +3979,7 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
     activeTaskId.value = task.id;
     await releaseTask();
     activeTaskId.value = prevActive;
-    await loadTasks('eyewire_ii');
+    await loadTasks();
     return true;
   }
 
@@ -3343,11 +4206,14 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
     // Tuesday still announced it in chat the instant you hit Send, pointing
     // everyone at something that `send_at` keeps hidden until Tuesday.
     //
-    // The `post_to_chat` flag is persisted on the row, and the scheduled
-    // announcement is posted at its send time by
-    // scripts/post-due-chat-announcements.mjs (cron, idempotent via
-    // notifications.chat_posted_at). Posting it from the clients themselves is
-    // not an option: every client that polls would post its own copy.
+    // The `post_to_chat` flag is persisted on the row; the scheduled
+    // announcement is posted at its send time by postDueChatAnnouncements()
+    // below, which the notification poller runs on every client. Exactly one
+    // client posts because the claim is an atomic conditional UPDATE on
+    // chat_posted_at (a naive "every client posts" would duplicate — that's why
+    // the claim matters). A cron (chat-announcements.yml) was the original plan
+    // but it lives on this branch, and GitHub only runs schedules from the
+    // default branch, so it never fired — hence the client-side poster.
     // "Scheduled" means the admin explicitly picked a future send time. Post to
     // chat instantly ONLY for send-now notifications — either no send_at, or one
     // whose time has already arrived. Key off `data.send_at` (undefined for a
@@ -3379,6 +4245,49 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
       } catch (e) { console.warn('[admin] post_to_chat failed:', e); }
     }
     await loadNotifications();
+  }
+
+  /**
+   * Post to chat any notifications whose scheduled send time has arrived, that
+   * asked to post to chat, and that haven't been posted yet. Runs on every
+   * connected client via the notification poller, but posts each announcement
+   * exactly once: the claim is an atomic conditional UPDATE (`.is('chat_posted_at',
+   * null)`), so only the client whose UPDATE actually flips the column wins and
+   * posts. This is what makes scheduled "also post to chat" announcements
+   * actually appear (the intended cron never ran — see createNotification).
+   */
+  async function postDueChatAnnouncements() {
+    const chatStore = useChatStore();
+    // Need a live channel to broadcast to other users. If no one is connected
+    // yet, leave the rows unposted; the next connected poller picks them up.
+    if (!chatStore.connected) return;
+    const now = new Date().toISOString();
+    const { data: due, error: dueErr } = await supabase
+      .from('notifications')
+      .select('id,title')
+      .eq('post_to_chat', true)
+      .is('chat_posted_at', null)
+      .lte('send_at', now)
+      // Don't announce something that already expired — this also skips a stale
+      // backlog of expired test notifications when this poster first ships.
+      .or(`expires_at.is.null,expires_at.gt.${now}`)
+      .order('send_at', { ascending: true })
+      .limit(10);
+    if (dueErr || !due?.length) return;
+    for (const n of due) {
+      // Atomic claim: only the row still NULL gets updated, and only one client's
+      // UPDATE can win that race, so exactly one client proceeds to post.
+      const { data: claimed, error: claimErr } = await supabase
+        .from('notifications')
+        .update({ chat_posted_at: new Date().toISOString() })
+        .eq('id', n.id)
+        .is('chat_posted_at', null)
+        .select('id');
+      if (claimErr) { console.warn('[admin] claim chat announcement failed:', claimErr.message); continue; }
+      if (claimed && claimed.length) {
+        chatStore.sendMessage(`📢 ${n.title}`, n.id);
+      }
+    }
   }
 
   /** Create a self-targeted notification (no admin required). */
@@ -3639,6 +4548,33 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
     }));
   }
 
+  // ── Building/Exploration badge awards ─────────────────────────────────────
+  // Persist the first time each edits/cells threshold is crossed, so a badge
+  // stays earned even if the underlying stat later drops. Keyed 'track:badgeId'.
+  const myBadgeAwards = ref<Set<string>>(new Set());
+  function badgeAwardKey(track: string, badgeId: number): string {
+    return `${track}:${badgeId}`;
+  }
+  async function loadMyBadgeAwards() {
+    if (!userId.value) return;
+    const { data } = await supabase
+      .from('badge_awards')
+      .select('track,badge_id')
+      .eq('user_id', userId.value);
+    myBadgeAwards.value = new Set((data || []).map((r: any) => badgeAwardKey(r.track, r.badge_id)));
+  }
+  async function recordBadgeAward(track: string, badgeId: number) {
+    if (!userId.value || badgeId == null) return;
+    const key = badgeAwardKey(track, badgeId);
+    if (myBadgeAwards.value.has(key)) return;   // already recorded this session
+    myBadgeAwards.value.add(key);
+    const { error: err } = await supabase
+      .from('badge_awards')
+      .upsert({ user_id: userId.value, track, badge_id: badgeId },
+              { onConflict: 'user_id,track,badge_id' });
+    if (err) console.warn('[badge] recordBadgeAward failed:', err.message);
+  }
+
   async function createSpecialBadge(data: {
     name: string; description: string; slug: string;
     image_url: string; thumbnail_url?: string;
@@ -3853,7 +4789,7 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
     notifications, notificationReads, unreadNotificationCount, loadNotifications,
     adminNotifications, adminNotifHasMore, loadAdminNotifications, updateNotification,
     markNotificationRead, markAllNotificationsRead,
-    createNotification, createSelfNotification, deleteNotification, dismissNotification,
+    createNotification, createSelfNotification, postDueChatAnnouncements, deleteNotification, dismissNotification,
     dismissAllNotifications,
     subscribeToNotifications, unsubscribeFromNotifications,
     pendingBadgeCelebration,
@@ -3863,6 +4799,7 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
     loadGroupMembers, addGroupMembers, removeGroupMember, searchUsers,
     // Special Badges
     specialBadges, mySpecialBadges,
+    myBadgeAwards, loadMyBadgeAwards, recordBadgeAward,
     loadSpecialBadges, loadMySpecialBadges, loadUserSpecialBadges,
     createSpecialBadge, awardBadge, awardBadgeToGroup, revokeBadge,
     // Image Upload

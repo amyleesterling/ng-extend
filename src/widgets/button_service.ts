@@ -86,11 +86,11 @@ export class ButtonService {
   private _applyStatus(button: HTMLButtonElement, status: CellStatus): void {
     button.classList.remove('nge-lb-incomplete', 'nge-lb-done-unlabeled', 'nge-lb-complete', 'nge-lb-annotated', 'nge-lb-claimed');
     if (status.isComplete && status.cellType) {
-      button.classList.add('nge-lb-complete');        // purple: both done
+      button.classList.add('nge-lb-complete');        // gold: done (proofread AND typed)
     } else if (status.isComplete) {
-      button.classList.add('nge-lb-done-unlabeled');  // blue: completed but not typed
+      button.classList.add('nge-lb-done-unlabeled');  // blue: proofread but not typed
     } else if (status.cellType) {
-      button.classList.add('nge-lb-annotated');        // green: typed but not completed
+      button.classList.add('nge-lb-annotated');        // pink: typed but not proofread
     } else {
       button.classList.add('nge-lb-incomplete');        // gray: nothing set
     }
@@ -169,7 +169,7 @@ export class ButtonService {
       // No cell type — the pip color is sufficient, no text needed
       badge.className = 'nge-label-badge';
       badge.textContent = '';
-      badge.title = status.isComplete ? 'Complete' : '';
+      badge.title = status.isComplete ? 'Proofread' : '';
     }
   }
 
@@ -260,13 +260,13 @@ export class ButtonService {
     const statusLine = document.createElement('div');
     statusLine.classList.add('nge-lb-status-line');
     statusLine.textContent = cachedStatus ?
-        (cachedStatus.isComplete ? '✓ Complete' : '○ In Progress') :
+        (cachedStatus.isComplete ? '✓ Proofread' : '○ In Progress') :
         '… Loading';
     completionSection.appendChild(statusLine);
 
     const toggleBtn = document.createElement('button');
     toggleBtn.classList.add('nge-lb-section-button', 'nge-lb-toggle-btn');
-    toggleBtn.textContent = cachedStatus?.isComplete ? 'Unmark Complete' : 'Mark Complete';
+    toggleBtn.textContent = cachedStatus?.isComplete ? 'Unmark Proofread' : 'Mark as Proofread';
     toggleBtn.addEventListener('click', async () => {
       toggleBtn.disabled = true;
       toggleBtn.textContent = 'Saving…';
@@ -274,8 +274,8 @@ export class ButtonService {
       const ok = await setCellComplete(
           localServerURL, segmentIDString, willBeComplete, cachedStatus?.annotationId);
       if (ok) {
-        statusLine.textContent = willBeComplete ? '✓ Complete' : '○ In Progress';
-        toggleBtn.textContent = willBeComplete ? 'Unmark Complete' : 'Mark Complete';
+        statusLine.textContent = willBeComplete ? '✓ Proofread' : '○ In Progress';
+        toggleBtn.textContent = willBeComplete ? 'Unmark Proofread' : 'Mark as Proofread';
         if (cachedStatus) cachedStatus.isComplete = willBeComplete;
         this._refreshButtonStatus(parent as HTMLButtonElement, localServerURL, segmentIDString);
 
@@ -435,17 +435,7 @@ export class ButtonService {
     });
     colorSection.appendChild(resetColorBtn);
 
-    // ── Section 4: Links ──────────────────────────────────────────────────
-    // CAVE lineage_graph endpoint replaces the old /progress/api/v1/query
-    // which 503s on minnie. Returns JSON of merge/split history for the seg.
-    const lineageUrl = dataset
-      ? `${localServerURL}/segmentation/api/v1/table/${dataset}/root/${segmentIDString}/lineage_graph`
-      : '';
-    const linksSection = this.generateSection(
-        'Links', [],
-        lineageUrl ? [['Change Log', lineageUrl, undefined]] : []);
-
-    // ── Section 5: Claim Cell ────────────────────────────────────────────
+    // ── Section 4: Claim Cell ────────────────────────────────────────────
     const claimSection = document.createElement('div');
     claimSection.classList.add('nge-lb-section');
 
@@ -525,7 +515,7 @@ export class ButtonService {
       }
     }
 
-    // ── Section 6: Ask for Help ───────────────────────────────────────────
+    // ── Section 5: Ask for Help ───────────────────────────────────────────
     const helpSection = document.createElement('div');
     helpSection.classList.add('nge-lb-section');
 
@@ -595,7 +585,7 @@ export class ButtonService {
     });
     helpSection.appendChild(helpBtn);
 
-    menu.append(br(), completionSection, br(), cellTypeSection, br(), colorSection, br(), claimSection, br(), helpSection, br(), linksSection, br());
+    menu.append(br(), completionSection, br(), cellTypeSection, br(), colorSection, br(), claimSection, br(), helpSection, br());
     return contextMenu;
   }
 

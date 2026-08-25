@@ -147,6 +147,8 @@ watch(() => stats.value.editsAllTime, (newEdits) => {
     if (badge.threshold <= 0) continue;
     if (prevEdits < badge.threshold && newEdits >= badge.threshold) {
       if (!claimBadgeOnce(badge.id != null ? `b:${badge.id}` : `b:${badge.slug}`)) continue;
+      // Persist the earn so it survives a stat drop / new device (item 11).
+      if (badge.id != null) backend.recordBadgeAward('building', badge.id);
       const imgUrl = BADGE_IMAGE_MAP[badge.imageKey] ?? '';
       addToast({
         type: 'badge',
@@ -188,6 +190,8 @@ watch(() => stats.value.cellsSubmitted, (newCells) => {
     if (badge.threshold <= 0) continue;
     if (prevCells < badge.threshold && newCells >= badge.threshold) {
       if (!claimBadgeOnce(badge.id != null ? `e:${badge.id}` : `e:${badge.slug}`)) continue;
+      // Persist the earn so it survives a stat drop / new device (item 11).
+      if (badge.id != null) backend.recordBadgeAward('exploration', badge.id);
       const imgUrl = BADGE_IMAGE_MAP[badge.imageKey] ?? '';
       addToast({
         type: 'badge',
@@ -285,6 +289,20 @@ function parseBadgeBody(body: string): { name: string; description: string } {
   return { name, description };
 }
 
+// One award reaches BOTH watchers below: the realtime handler sets
+// pendingBadgeCelebration AND calls loadNotifications(), which grows the list.
+// Without dedup that's two toasts + two confetti bursts per badge. Gate both on
+// a short window keyed by the badge title so a single award celebrates once,
+// while a genuine re-earn or a deliberate replay-on-click later still fires.
+const recentCelebrations = new Map<string, number>();
+function claimCelebration(key: string): boolean {
+  const now = Date.now();
+  const last = recentCelebrations.get(key) ?? 0;
+  if (now - last < 6000) return false;
+  recentCelebrations.set(key, now);
+  return true;
+}
+
 watch(() => backend.notifications.length, (newLen) => {
   if (prevNotifCount < 0) { prevNotifCount = newLen; return; }
   if (newLen <= prevNotifCount) { prevNotifCount = newLen; return; }
@@ -292,6 +310,7 @@ watch(() => backend.notifications.length, (newLen) => {
   const newNotifs = backend.notifications.slice(0, newLen - prevNotifCount);
   for (const notif of newNotifs) {
     if (notif.title?.includes('New Achievement')) {
+      if (!claimCelebration(notif.title)) continue;
       const { name, description } = parseBadgeBody(notif.body || '');
       addToast({
         type: 'badge',
@@ -309,6 +328,10 @@ watch(() => backend.notifications.length, (newLen) => {
 // ── Replay badge celebration when clicked from notification panel ─────────
 watch(() => backend.pendingBadgeCelebration, (pending) => {
   if (!pending) return;
+  backend.pendingBadgeCelebration = null;
+  // Same dedup as the notifications watcher: if the realtime path already
+  // celebrated this award moments ago, don't double it.
+  if (pending.title && !claimCelebration(pending.title)) return;
   const { name, description } = parseBadgeBody(pending.body || '');
   addToast({
     type: 'badge',
@@ -318,7 +341,6 @@ watch(() => backend.pendingBadgeCelebration, (pending) => {
     isImage: !!pending.imageUrl,
   });
   fireConfetti('gold', 1.5);
-  backend.pendingBadgeCelebration = null;
 });
 
 // ── Cell completion celebration ──

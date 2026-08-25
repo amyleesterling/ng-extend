@@ -11,8 +11,9 @@
  * Handles multiple concurrent login prompts (e.g. two auth servers).
  */
 import { ref, onMounted, onUnmounted } from 'vue';
-import { openSegPanel } from '../widgets/widget_utils';
+import { openSegPanel, showDefaultCell } from '../widgets/widget_utils';
 import { defaultCredentialsManager } from 'neuroglancer/credentials_provider/default_manager';
+import { isMobileRef, mobileWelcomeOpenRef } from '../util/mobile';
 
 /** sticky_auth realm for the CAVE backend (minnie + global.daf-apis CAVE
  *  endpoints). All datasets currently route through this realm. */
@@ -29,6 +30,11 @@ interface LoginPrompt {
 
 const visible   = ref(false);
 const prompts   = ref<LoginPrompt[]>([]);
+/** True once any server was linked this session; drives the "signing in
+ *  twice?" explainer when a second auth realm asks again. */
+const hasLinkedBefore = ref((() => {
+  try { return sessionStorage.getItem('nge_auth_linked_once') === '1'; } catch { return false; }
+})());
 
 /**
  * DOM elements we've already handled (either by surfacing the modal or
@@ -161,6 +167,18 @@ function dismiss() {
   // dataset switches) and we need the observer to react to them.
 }
 
+/**
+ * Mobile welcome sheet's LOG IN WITH GOOGLE button: start auth immediately
+ * instead of making the user tap Log in a second time here. Dispatched
+ * synchronously from the tap, so doLogin's window.open keeps the
+ * user-gesture flag. If no login prompt has surfaced yet, re-scan and try
+ * once more; failing that the modal simply stays visible as before.
+ */
+function requestLogin() {
+  scanForLoginPrompts();
+  loginAll();
+}
+
 function handleLoginSuccess() {
   console.log('[LoginModal] middleauthlogin event fired — marking waiting prompts as done');
   // Mark waiting prompts as done. Their DOM elements stay in
@@ -171,6 +189,11 @@ function handleLoginSuccess() {
       p.done = true;
       p.waiting = false;
       handledStatusEls.add(p.statusEl);
+      // Remember that at least one server was linked this session: if the
+      // modal resurfaces for another server, the "signing in twice?"
+      // explainer shows even though the done row is gone.
+      hasLinkedBefore.value = true;
+      try { sessionStorage.setItem('nge_auth_linked_once', '1'); } catch {}
     }
   }
 
@@ -192,9 +215,19 @@ function handleLoginSuccess() {
       setTimeout(() => scanForLoginPrompts(), delay);
     }
 
-    // After login, auto-select the segmentation layer and open the Seg tab
-    // so the user lands in the expected view.
-    setTimeout(() => openSegPanel(), 1500);
+    // After login, land somewhere with something to see. Desktop:
+    // auto-select the segmentation layer and open the Seg tab. Phones:
+    // the forced-3D view is empty until a neuron is chosen, so the seg
+    // tab reads as a blank page (Amy 2026-08-24) — open the Cell
+    // Library instead: pick a neuron, see it in 3D.
+    if (isMobileRef.value) {
+      // Show the showcase cell (config defaultSegments — the pinky
+      // neuron) so login lands on a cell in 3D, not a black screen
+      // (Amy 2026-08-24). Meshes need the fresh auth, hence post-login.
+      setTimeout(() => showDefaultCell(), 800);
+    } else {
+      setTimeout(() => openSegPanel(), 1500);
+    }
   }
   // Otherwise modal stays open — user clicks the next server's Login button
 }
@@ -251,6 +284,13 @@ onMounted(() => {
   // Listen for the middleauthlogin event (fired on successful auth)
   window.addEventListener('middleauthlogin', handleLoginSuccess);
 
+  // Mobile welcome sheet: dismissing it in "just exploring" mode also
+  // dismisses identity verification (same as tapping BYPASS).
+  document.addEventListener('nge:dismiss-login', dismiss);
+
+  // Mobile welcome sheet's login button: jump straight into the auth popup.
+  document.addEventListener('nge:request-login', requestLogin);
+
   // Try to find statusContainer immediately
   if (!watchForStatusContainer()) {
     // Not created yet — observe the neuroglancer container for its creation
@@ -285,6 +325,8 @@ onUnmounted(() => {
   rootObserver?.disconnect();
   if (pollTimer) clearInterval(pollTimer);
   window.removeEventListener('middleauthlogin', handleLoginSuccess);
+  document.removeEventListener('nge:dismiss-login', dismiss);
+  document.removeEventListener('nge:request-login', requestLogin);
 });
 
 function shortUrl(url: string): string {
@@ -310,7 +352,7 @@ function serverLabel(url: string): string {
 <template>
   <Teleport to="body">
     <Transition name="nge-login-modal">
-      <div v-if="visible" class="nge-login-blocker" @click.self="dismiss">
+      <div v-if="visible && !(isMobileRef && mobileWelcomeOpenRef)" class="nge-login-blocker" @click.self="dismiss">
 
         <!-- Animated background particles -->
         <div class="nge-holo-particles"></div>
@@ -615,6 +657,15 @@ function serverLabel(url: string): string {
             </div>
           </div>
 
+          <!-- The "why do I have to sign in twice" explainer (Amy): each CAVE
+               data server runs its own auth realm, so a second dataset means a
+               second (instant) allow with the same account. -->
+          <div v-if="prompts.length > 1 || hasLinkedBefore" class="nge-login-why">
+            <span class="nge-login-why-q">Signing in twice?</span>
+            Each data server guards its own door. Same account both times, the
+            second pass is just a quick allow.
+          </div>
+
           <button
             class="nge-login-btn"
             :disabled="prompts.every(p => p.done || p.waiting)"
@@ -639,6 +690,28 @@ function serverLabel(url: string): string {
 /* ══════════════════════════════════════════════════════════════════════════
    HOLOGRAPHIC SCI-FI LOGIN MODAL
    ══════════════════════════════════════════════════════════════════════════ */
+
+.nge-login-why {
+  margin: 10px auto 0;
+  max-width: 340px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(170, 195, 230, 0.75);
+  background: rgba(53, 181, 255, 0.06);
+  border: 1px solid rgba(53, 181, 255, 0.18);
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-align: left;
+}
+.nge-login-why-q {
+  display: block;
+  font-family: 'Orbitron', 'Inter', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(53, 181, 255, 0.85);
+  margin-bottom: 3px;
+}
 
 .nge-login-blocker {
   position: fixed;

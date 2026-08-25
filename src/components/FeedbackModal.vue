@@ -5,9 +5,10 @@
  * anywhere in the app. Posts to the `submitIssue` Cloud Function which relays
  * to Slack (#citsci_feedback) and keeps a Firestore record. No auth required.
  */
-import { ref } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import ModalOverlay from 'components/ModalOverlay.vue';
 import { useProofreadingBackendStore } from '../store';
+import { mintShortStateLink } from '../util/state_link';
 
 const emit = defineEmits({ hide: null });
 const backend = useProofreadingBackendStore();
@@ -20,6 +21,8 @@ const CATEGORIES = ['Bug', 'Idea', 'Data problem', 'Other'] as const;
 const category = ref<typeof CATEGORIES[number]>('Bug');
 const message = ref('');
 const sending = ref(false);
+/** Attach a share link of the current view (on by default; Celia's ask). */
+const attachView = ref(true);
 const done = ref(false);
 const error = ref('');
 
@@ -42,18 +45,49 @@ async function submit() {
   sending.value = true;
   error.value = '';
   try {
+    // NEVER send window.location.href: the hash carries the full viewer
+    // state (multiple KB) and relays like Slack truncate it, leaving a link
+    // that dies with "Error parsing state: Unterminated string in JSON".
+    // Mint a short saved-state link instead; if that fails (no auth, state
+    // server down), send the bare page URL plus the position so the report
+    // still locates the spot without a broken link.
+    const shortLink = attachView.value ? await mintShortStateLink() : null;
+    let pageUrl = shortLink;
+    if (!pageUrl) {
+      const v: any = (window as any)['viewer'];
+      const pos = v?.navigationState?.position?.value;
+      const at = pos ? ` @ ${Math.round(pos[0])},${Math.round(pos[1])},${Math.round(pos[2])}` : '';
+      pageUrl = `${window.location.origin}${window.location.pathname}${at}`;
+    }
     const res = await fetch(ISSUE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: text,
         category: category.value,
-        url: window.location.href,
+        url: pageUrl,
         dataset: currentDataset(),
         user: backend.userName || '',
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    // Mirror into Supabase so the triage agent can read reports (the Cloud
+    // Function's Slack/Firestore relay stays the human-facing feed).
+    // Best-effort: a failure here must not surface as a failed submit.
+    try {
+      const { supabase } = await import('../supabase');
+      await supabase.from('site_issues').insert({
+        category: category.value,
+        message: text,
+        url: pageUrl,
+        dataset: currentDataset() || null,
+        user_id: backend.userId || null,
+        user_name: backend.userName || null,
+      });
+    } catch (e) {
+      console.warn('[feedback] Supabase mirror failed:', e);
+    }
     done.value = true;
     setTimeout(() => emit('hide'), 1600);
   } catch (e: any) {
@@ -63,11 +97,170 @@ async function submit() {
     sending.value = false;
   }
 }
+
+// ── Flow-field backdrop ──────────────────────────────────────────────────────
+// Particles drifting along a gradient-noise flow field across the whole
+// overlay backdrop, BEHIND the dialog (feedback_triage proposal approved by
+// Amy 2026-08-11; inspiration: amyleesterling.github.io/experimental-UI).
+// The canvas is declared inside this component but re-parented into
+// ModalOverlay's `.nge-overlay-blocker` on mount, where z-index 0 puts it
+// above the dim backdrop and below the `.overlay-content` box (z-index 100).
+// Purely decorative: skipped entirely under prefers-reduced-motion, capped
+// DPR, particle count scaled to viewport area, and the rAF loop lives only
+// while the modal is mounted.
+const fxCanvas = ref<HTMLCanvasElement | null>(null);
+let fxRaf = 0;
+let fxObserver: ResizeObserver | null = null;
+
+/** Smooth 2D value noise: deterministic hash grid + smoothstep interpolation. */
+function makeNoise() {
+  const hash = (x: number, y: number) => {
+    const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+    return h - Math.floor(h);
+  };
+  const smooth = (t: number) => t * t * (3 - 2 * t);
+  return (x: number, y: number): number => {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const a = hash(xi, yi), b = hash(xi + 1, yi);
+    const c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+    const u = smooth(xf), v = smooth(yf);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  };
+}
+
+onMounted(() => {
+  const canvas = fxCanvas.value;
+  if (!canvas) return;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  // Re-parent the canvas into the overlay blocker so the field spans the
+  // whole backdrop and paints behind the dialog. The element keeps its
+  // data-v scope attribute, so the scoped .nge-fb-fx rule still applies.
+  const blocker = canvas.closest('.nge-overlay-blocker');
+  if (blocker) blocker.insertBefore(canvas, blocker.firstChild);
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  const noise = makeNoise();
+  let w = 0, h = 0;
+
+  const fit = () => {
+    const el = canvas.parentElement!;
+    w = el.offsetWidth; h = el.offsetHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  fit();
+  fxObserver = new ResizeObserver(fit);
+  fxObserver.observe(canvas.parentElement!);
+
+  // Glowing motes, not trails: long-lived line trails read as worms (Amy).
+  // Each particle is a soft radial-gradient sprite drawn with additive
+  // blending, drifting slowly along the field; a fast per-frame fade keeps
+  // only the faintest comet tail.
+  const COLOR_TRIPLETS: [number, number, number][] =
+    [[120, 140, 255], [100, 200, 255], [150, 170, 255]];
+  const SPRITE = 48; // sprite canvas size; glow radius = SPRITE/2
+  const sprites = COLOR_TRIPLETS.map(([r, g, b]) => {
+    const s = document.createElement('canvas');
+    s.width = s.height = SPRITE;
+    const sc = s.getContext('2d')!;
+    const grad = sc.createRadialGradient(SPRITE / 2, SPRITE / 2, 0, SPRITE / 2, SPRITE / 2, SPRITE / 2);
+    grad.addColorStop(0, `rgba(255, 255, 255, 0.9)`);
+    grad.addColorStop(0.18, `rgba(${r}, ${g}, ${b}, 0.55)`);
+    grad.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.12)`);
+    grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+    sc.fillStyle = grad;
+    sc.fillRect(0, 0, SPRITE, SPRITE);
+    return s;
+  });
+
+  const COUNT = Math.min(160, Math.max(60, Math.round((w * h) / 9000)));
+  const particles = Array.from({ length: COUNT }, () => ({
+    x: Math.random() * w, y: Math.random() * h,
+    sprite: sprites[Math.floor(Math.random() * sprites.length)],
+    size: 5 + Math.random() * 13,          // drawn sprite diameter in px
+    speed: 0.12 + Math.random() * 0.18,    // slow drift
+    phase: Math.random() * Math.PI * 2,    // twinkle offset
+    life: Math.random() * 600,
+  }));
+
+  let t = Math.random() * 100;
+  const SCALE = 0.010; // field frequency in px⁻¹
+
+  // Lifecycle: the field greets you, then bows out after a few seconds so
+  // it never distracts from typing; it returns for the success state.
+  // fieldAlpha eases toward fieldTarget; at 0 the canvas is wiped (traces
+  // included) and the rAF loop parks itself until woken.
+  let fieldAlpha = 1;
+  let fieldTarget = 1;
+  let parked = false;
+  const ENTRANCE_MS = 4500;
+  let fadeTimer = setTimeout(() => { fieldTarget = 0; }, ENTRANCE_MS);
+
+  const frame = () => {
+    t += 0.0016;
+    fieldAlpha += (fieldTarget - fieldAlpha) * 0.035;
+    if (fieldTarget === 0 && fieldAlpha < 0.01) {
+      ctx.clearRect(0, 0, w, h); // traces vanish with the motes
+      parked = true;
+      return; // stop scheduling frames while invisible
+    }
+
+    // Fast fade: only a whisper of a comet tail survives, no worm trails.
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
+    ctx.fillRect(0, 0, w, h);
+    // Additive blending makes overlapping motes bloom instead of muddying.
+    ctx.globalCompositeOperation = 'lighter';
+
+    for (const p of particles) {
+      const angle = noise(p.x * SCALE, p.y * SCALE + t) * Math.PI * 4;
+      p.x += Math.cos(angle) * p.speed;
+      p.y += Math.sin(angle) * p.speed;
+      p.life -= 1;
+      if (p.life <= 0 || p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20) {
+        p.x = Math.random() * w; p.y = Math.random() * h;
+        p.life = 300 + Math.random() * 600;
+        continue;
+      }
+      // Gentle twinkle so the field breathes; fade in/out at life edges.
+      const twinkle = 0.55 + 0.45 * Math.sin(t * 40 + p.phase);
+      const edge = Math.min(1, p.life / 60);
+      ctx.globalAlpha = 0.5 * twinkle * edge * fieldAlpha;
+      ctx.drawImage(p.sprite, p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    fxRaf = requestAnimationFrame(frame);
+  };
+  fxRaf = requestAnimationFrame(frame);
+
+  // Encore on the success state: wake the field back up behind the ✓.
+  watch(done, isDone => {
+    if (!isDone) return;
+    clearTimeout(fadeTimer);
+    fieldTarget = 1;
+    if (parked) {
+      parked = false;
+      fxRaf = requestAnimationFrame(frame);
+    }
+  });
+});
+
+onBeforeUnmount(() => {
+  cancelAnimationFrame(fxRaf);
+  fxObserver?.disconnect();
+  fxObserver = null;
+});
 </script>
 
 <template>
   <modal-overlay id="nge-feedback-modal" class="nge-feedback-modal" @hide="emit('hide')">
     <div class="nge-fb-shell">
+      <canvas ref="fxCanvas" class="nge-fb-fx" aria-hidden="true"></canvas>
       <button class="nge-fb-exit" @click="emit('hide')">×</button>
 
       <div v-if="!done" class="nge-fb-body">
@@ -92,6 +285,11 @@ async function submit() {
           @input="error = ''"
         ></textarea>
 
+        <label class="nge-fb-attach">
+          <input type="checkbox" v-model="attachView" />
+          <span>Attach my current view, a share link so the team sees exactly what I see</span>
+        </label>
+
         <div v-if="error" class="nge-fb-err">{{ error }}</div>
 
         <div class="nge-fb-actions">
@@ -102,7 +300,8 @@ async function submit() {
         </div>
       </div>
 
-      <div v-else class="nge-fb-done">
+      <div v-else class="nge-fb-done holoscan holo-on">
+        <span class="holoscan-line" aria-hidden="true"></span>
         <div class="nge-fb-done-icon">✓</div>
         <div class="nge-fb-done-text">Thanks — your report was sent.</div>
       </div>
@@ -119,6 +318,14 @@ async function submit() {
   min-width: 340px;
   max-width: 460px;
   padding: 20px 22px;
+}
+/* Lives in .nge-overlay-blocker after mount: above the dim backdrop
+   (z-index auto), below the .overlay-content dialog (z-index 100). */
+.nge-fb-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
 }
 .nge-fb-exit {
   position: absolute;
@@ -180,6 +387,16 @@ async function submit() {
 .nge-fb-note:focus { outline: none; border-color: rgba(120, 140, 255, 0.5); }
 .nge-fb-note::placeholder { color: #667; }
 .nge-fb-err { color: #ff9d9d; font-size: 0.78em; margin-top: 6px; }
+.nge-fb-attach {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  font-size: 0.78em;
+  color: #9ab;
+  cursor: pointer;
+}
+.nge-fb-attach input { accent-color: #7890ff; }
 .nge-fb-actions {
   display: flex;
   gap: 8px;
@@ -214,6 +431,36 @@ async function submit() {
   gap: 10px;
   padding: 30px 24px;
   min-width: 300px;
+  /* Host requirements for the scan pass (scifi-ui scan-pass.css). */
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+/* ── Scan pass on the success state ──
+   Ported verbatim from scifi-ui components/scan-pass.css (the "light bar"):
+   a band that passes ONCE when the panel appears, and never loops. The
+   .holo-on class is on the element at insert time, so the pass fires the
+   moment the success state mounts. Values carried across unmodified per the
+   kit's porting discipline; only the trigger differs (mount instead of
+   hover), which is the touch path the kit itself defines. */
+.holoscan > .holoscan-line {
+  position: absolute; left: 0; right: 0; top: 0; height: 9%; z-index: 2;
+  pointer-events: none; opacity: 0;
+  background: linear-gradient(180deg, transparent,
+    rgb(var(--holo-cyan, 126 224 255) / .13), transparent);
+}
+@keyframes holoscan-pass {
+  from { transform: translateY(-100%); opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  to   { transform: translateY(1100%); opacity: 0; }
+}
+.holoscan.holo-on > .holoscan-line {
+  animation: holoscan-pass 1600ms cubic-bezier(.22, .9, .28, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .holoscan.holo-on > .holoscan-line { animation: none; opacity: 0; }
 }
 .nge-fb-done-icon {
   width: 44px;

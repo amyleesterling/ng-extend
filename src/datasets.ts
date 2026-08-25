@@ -13,15 +13,27 @@ export interface DatasetEntry {
   label: string;
   /** Compact name for inline UI (chat chips, badges) where `label` is too long. */
   shortLabel: string;
+  /** Shortest name, for the top bar's "Data:" button. */
+  abbrev: string;
+  /** Organism the volume comes from; drives the species icon. */
+  species: 'mouse' | 'fly';
   description: string;
   layers: any[];
 }
+
+/** Species icon shown next to dataset names (top bar, profile Datasets tab). */
+export const SPECIES_ICONS: Record<DatasetEntry['species'], string> = {
+  mouse: '🐭',
+  fly: '🪰',
+};
 
 export const DATASETS: DatasetEntry[] = [
   {
     id: 'stroeh_mouse_retina',
     label: 'EyeWire II: Retina',
     shortLabel: 'EyeWire II',
+    abbrev: 'Retina',
+    species: 'mouse',
     description: 'EyeWire II — mouse retinal connectome (16×16×40 nm)',
     layers: [
       {
@@ -44,6 +56,8 @@ export const DATASETS: DatasetEntry[] = [
     id: 'pinky_sandbox',
     label: 'Pinky Sandbox',
     shortLabel: 'Pinky',
+    abbrev: 'Pinky',
+    species: 'mouse',
     description: 'MICrONS pinky — small cortex volume for testing (4×4×40 nm)',
     layers: [
       {
@@ -66,6 +80,8 @@ export const DATASETS: DatasetEntry[] = [
     id: 'minnie65',
     label: 'MICrONS Minnie65',
     shortLabel: 'MICrONS',
+    abbrev: 'MICrONS',
+    species: 'mouse',
     description: 'MICrONS — 1mm³ mouse visual cortex (8×8×40 nm)',
     layers: [
       {
@@ -84,6 +100,36 @@ export const DATASETS: DatasetEntry[] = [
       },
     ],
   },
+  {
+    id: 'minnie65_live',
+    label: 'MICrONS Live',
+    shortLabel: 'MICrONS Live',
+    abbrev: 'Live',
+    species: 'mouse',
+    // The ROLLING public graphene table (plain minnie65_public), unlike the
+    // frozen v117 snapshot the main MICrONS entry uses. The Dorkenwald and
+    // Fuming export roots resolve here; this is also the table their
+    // merge-free demo actually queries (its bundles carry
+    // datastack minnie65_public). minnie65_phase3_v1 is a datastack /
+    // aligned-volume name, NOT a graphene table: using it as one 400s.
+    description: 'MICrONS minnie65 on the rolling public graph — where the AI merge-candidate roots resolve',
+    layers: [
+      {
+        type: 'image',
+        source: 'precomputed://https://bossdb-open-data.s3.amazonaws.com/iarpa_microns/minnie/minnie65/em',
+        name: 'em',
+      },
+      {
+        type: 'segmentation',
+        source: {
+          url: 'graphene://middleauth+https://minnie.microns-daf.com/segmentation/table/minnie65_public',
+          subsources: { default: true, mesh: true, graph: true },
+          enableDefaultSubsources: true,
+        },
+        name: 'minnie65_public_live',
+      },
+    ],
+  },
 ];
 
 /** Segmentation-layer name for an entry (what `getCurrentDatasetName()` returns). */
@@ -96,6 +142,56 @@ export function segLayerName(ds: DatasetEntry): string {
 export function findDatasetBySegName(name: string): DatasetEntry | undefined {
   if (!name) return undefined;
   return DATASETS.find(ds => segLayerName(ds) === name);
+}
+
+/**
+ * The segmentation-layer name currently on screen. Prefers a visible,
+ * non-archived layer: switching datasets leaves the previous segmentation layer
+ * archived in `managedLayers`, so taking the first one would report a stale
+ * dataset (e.g. the tutorial's pinky while the viewer is really on stroeh).
+ *
+ * Reads the live `window['viewer']`, which is NOT reactive — callers needing the
+ * value to update on a dataset switch should also touch a reactive layer signal
+ * (e.g. `useLayersStore().activeLayers`).
+ */
+/** The managed segmentation layer currently on screen (visible and not
+ *  archived), falling back to the first segmentation layer. Dataset
+ *  switches leave the previous segmentation layer archived in
+ *  managedLayers, so "first seg layer" heuristics silently target the OLD
+ *  dataset: segments jumped to on MICrONS Live were being added to the
+ *  archived public minnie layer. */
+export function currentSegLayer(): any {
+  try {
+    const viewer = (window as any)['viewer'];
+    const layers = viewer?.layerManager?.managedLayers ?? [];
+    const isSeg = (ml: any) => {
+      const cn = ml?.layer?.constructor?.name ?? '';
+      return cn.includes('Segmentation') || ml?.layer?.type === 'segmentation';
+    };
+    let firstSeg: any = null;
+    for (const ml of layers) {
+      if (!isSeg(ml)) continue;
+      if (!firstSeg) firstSeg = ml;
+      if (ml.visible !== false && !ml.archived) return ml;
+    }
+    return firstSeg;
+  } catch { return null; }
+}
+
+export function currentSegLayerName(): string {
+  return currentSegLayer()?.name ?? '';
+}
+
+/**
+ * Canonical dataset tag to STAMP on and FILTER Supabase rows (tasks, edits,
+ * help, etc.) for whatever dataset is currently on screen. Replaces the old
+ * hardcoded 'eyewire_ii' string that mislabelled every row regardless of the
+ * active dataset. Falls back to the stroeh production dataset when the viewer
+ * isn't ready — which is also the canonical value 'eyewire_ii' migrates to, so
+ * existing rows still match.
+ */
+export function currentDatasetTag(): string {
+  return canonicalDataset(currentSegLayerName()) || 'stroeh_mouse_retina';
 }
 
 /**
@@ -135,9 +231,39 @@ const EXTRA_SHORT_LABELS: Record<string, string> = {
 
 export function datasetDisplayName(name: string | undefined | null): string {
   if (!name) return '';
+  // Exact layer-name match first: two entries can share a canonical tag
+  // (public MICrONS and MICrONS Live), and canonicalising first would
+  // always label both as the first entry.
+  const exact = findDatasetBySegName(name);
+  if (exact) return exact.shortLabel;
   const canon = canonicalDataset(name);
-  const entry = DATASETS.find(ds => canonicalDataset(segLayerName(ds)) === canon);
+  const entry = findDatasetByCanonical(canon);
   return entry?.shortLabel ?? EXTRA_SHORT_LABELS[canon] ?? name;
+}
+
+/** Dataset entry for any historical name variant (canonicalises first). */
+export function findDatasetByCanonical(canon: string): DatasetEntry | undefined {
+  return DATASETS.find(ds => canonicalDataset(segLayerName(ds)) === canon);
+}
+
+/** Top-bar abbreviation for any dataset-name variant ('' when unknown). */
+export function datasetAbbrev(name: string | undefined | null): string {
+  if (!name) return '';
+  const exact = findDatasetBySegName(name);
+  if (exact) return exact.abbrev;
+  const canon = canonicalDataset(name);
+  return findDatasetByCanonical(canon)?.abbrev ?? EXTRA_SHORT_LABELS[canon] ?? '';
+}
+
+/** Species icon for any dataset-name variant. FlyWire has no DATASETS entry
+ *  but can appear on older records, so it gets an explicit fallback. */
+export function datasetSpeciesIcon(name: string | undefined | null): string {
+  if (!name) return '';
+  const canon = canonicalDataset(name);
+  const entry = findDatasetByCanonical(canon);
+  if (entry) return SPECIES_ICONS[entry.species];
+  if (canon.includes('fly')) return SPECIES_ICONS.fly;
+  return '';
 }
 
 /**

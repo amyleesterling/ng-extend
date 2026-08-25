@@ -13,6 +13,14 @@
   transition: opacity 0.2s;
 }
 
+/* The selected-layer side panel toggle (sliders icon) sits at the far right
+   of the top bar (Amy 2026-08-17). The row is flex; order beats DOM order. */
+.neuroglancer-viewer-top-row > [title="Show layer side panel"],
+.neuroglancer-viewer-top-row > [title="Hide layer side panel"] {
+  order: 999;
+  margin-right: 4px;
+}
+
 /* ── Panel hover border: subtle dark blue instead of white ── */
 .neuroglancer-panel:focus-within {
   border-color: rgba(40, 70, 120, 0.6) !important;
@@ -21,21 +29,42 @@
   border-color: rgba(20, 30, 50, 0.4) !important;
 }
 
-/* ── Coordinate display (top-left x, y, z) ── */
+/* ── Coordinate display ──
+   Condensed chip (Amy 2026-08-12): no "(4nm)" scale labels, just
+   "x 70341  y 64982  z 885" in a slim holo box, sky blue not orange.
+   Lives bottom-left in the band under the chat panel (chat floats at
+   bottom: 36px), out of the top bar entirely (Amy 2026-08-17). */
 .neuroglancer-position-widget {
-  background: transparent !important;
-  border-radius: 6px;
-  padding: 4px 8px;
+  position: fixed;
+  left: 8px;
+  bottom: 6px;
+  z-index: 60;
+  background: rgba(6, 12, 24, 0.82) !important;
+  border: 1px solid rgba(53, 181, 255, 0.28);
+  border-radius: 7px;
+  box-shadow: inset 0 0 10px rgba(53, 181, 255, 0.06);
+  padding: 2px 9px;
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 0.82em;
+  display: inline-flex;
+  align-items: center;
 }
 
+/* The "(4nm)" / "(40nm)" scale annotations: gone. The dimension scales are
+   still visible and editable in the layer side panel's source tab. */
+.neuroglancer-position-dimension-scale-container { display: none !important; }
+
+.neuroglancer-position-dimension { margin-right: 10px; }
+.neuroglancer-position-dimension:last-of-type { margin-right: 4px; }
+
 .neuroglancer-position-dimension-name {
-  color: rgba(74, 158, 255, 0.7) !important;
+  color: rgba(53, 181, 255, 0.95) !important;
+  margin-right: 4px;
 }
 
 .neuroglancer-position-dimension-coordinate {
-  color: rgba(200, 210, 230, 0.9) !important;
+  color: #dfe9ff !important;
+  font-weight: 600;
 }
 
 /* ── Mouse-hover coordinate readout (orange "x y z" that appears while
@@ -51,21 +80,111 @@
   overflow: hidden;
 }
 
-/* ── Layer bar (bottom: "1img", "2pinky_training6", "+") ── */
+/* Moved out of the top bar entirely (Amy 2026-08-11): the readout now
+   floats as a chip in the bottom-left of the viewer, above the scale bar.
+   position:fixed frees it from the bar's layout, so the digit-count
+   flutter can no longer reflow anything. Hidden while not hovering
+   (neuroglancer clears its text, so :empty applies). */
+.neuroglancer-mouse-position-widget {
+  position: fixed;
+  left: 10px;
+  bottom: 38px;
+  z-index: 60;
+  flex: none;
+  max-width: 40vw;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: rgba(4, 8, 18, 0.75);
+  border: 1px solid rgba(255, 160, 60, 0.25);
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.neuroglancer-mouse-position-widget:empty {
+  display: none;
+}
+
+/* ── Layer bar (bottom: "1img", "2pinky_training6", "+") ──
+   Unified 2026-08-11 (Amy: "this bar is a mess"): one compact row, every
+   chip the same 24px height, number as a subtle badge, close/delete icons
+   only on hover, per-chip hover-value text hidden (the seg panel already
+   shows the segment under the cursor). */
 .neuroglancer-layer-panel {
   background: rgba(4, 8, 18, 0.9) !important;
   backdrop-filter: blur(8px);
   border-top: none !important;
-  padding: 2px 4px;
-  gap: 3px;
+  padding: 3px 6px;
+  gap: 4px;
+  align-items: center !important;
+  min-height: 30px;
 }
 
 .neuroglancer-layer-item {
-  border-radius: 4px !important;
+  border-radius: 5px !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   background: rgba(255, 255, 255, 0.04) !important;
-  font-size: 0.85em;
+  font-size: 12px;
+  height: 24px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px !important;
+  margin: 0 !important;
   transition: border-color 0.15s, background 0.15s;
+}
+
+.neuroglancer-layer-item-number {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: rgba(120, 140, 255, 0.15);
+  color: rgba(190, 200, 255, 0.85);
+}
+
+.neuroglancer-layer-item-label {
+  font-size: 12px;
+  line-height: 1;
+  /* Kill the vendored gray label box, it read as a box-in-a-box. */
+  background: transparent !important;
+  padding-right: 0 !important;
+}
+
+/* Pick-enabled layers used stock neuroglancer magenta (#939), the one loud
+   off-palette square in the layer bar. Same state, site blue. */
+.neuroglancer-layer-item[data-pick="true"] .neuroglancer-layer-item-label {
+  background: rgba(53, 181, 255, 0.18) !important;
+  border-radius: 3px;
+  padding: 1px 4px !important;
+}
+
+/* Close/delete icons: present but quiet until the chip is hovered. */
+.neuroglancer-layer-item .neuroglancer-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.neuroglancer-layer-item:hover .neuroglancer-icon { opacity: 0.8; }
+.neuroglancer-layer-item .neuroglancer-icon:hover { opacity: 1; }
+
+/* The per-chip value readout (orange numbers while hovering the viewer)
+   duplicated the seg panel and gave every chip a different width. */
+.neuroglancer-layer-item-value { display: none !important; }
+
+/* The stray per-item position widget adds phantom height. */
+.neuroglancer-layer-item > .neuroglancer-position-widget { display: none; }
+
+.neuroglancer-layer-add-button {
+  width: 24px !important;
+  height: 24px !important;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+.neuroglancer-layer-add-button:hover {
+  background: rgba(120, 140, 255, 0.12);
 }
 
 .neuroglancer-layer-item:hover {
@@ -101,15 +220,19 @@
   color: rgba(74, 158, 255, 0.7) !important;
 }
 
-/* ── Hide neuroglancer settings gear + JSON editor from top bar ── */
-/* They are moved into our Settings panel.
-   The layer-list toggle is deliberately NOT hidden: it's the only way to reach
-   the layer panel, and with it hidden there was no discoverable path to the
-   hidden layers. It keeps the shared neutral top-row icon treatment below
-   (and the blue active underline when open) — never neuroglancer's red. */
+/* ── Hide neuroglancer settings gear + JSON editor + layer-list toggle ── */
+/* Settings and JSON are moved into our Settings panel. The layer-list toggle is
+   now the reorderable "Layers" icon in our own toolbar (see ExtensionBar +
+   toolbar-icons.ts), which drives the same layerListPanelState — so the native
+   one is hidden here to avoid two buttons for one panel. Do NOT re-hide this
+   without keeping the toolbar Layers icon: it's the only path to the layer
+   panel. Both title states are listed because the button is a checkbox that
+   flips its title when the panel is open. */
 .neuroglancer-viewer-top-row > [title="Show settings panel"],
 .neuroglancer-viewer-top-row > [title="Hide settings panel"],
-.neuroglancer-viewer-top-row > [title="Edit JSON state"] {
+.neuroglancer-viewer-top-row > [title="Edit JSON state"],
+.neuroglancer-viewer-top-row > [title="Show layer list panel"],
+.neuroglancer-viewer-top-row > [title="Hide layer list panel"] {
   display: none !important;
 }
 
@@ -768,6 +891,19 @@
 /* ── Side panel overall background ── */
 .neuroglancer-side-panel {
   background: rgba(6, 10, 20, 0.97);
+}
+
+/* ── Never-cropped rule (Amy 2026-08-11) ──
+   Every ModalOverlay dialog is bounded by the viewport and scrolls
+   internally instead of rendering past the screen edge. !important because
+   ModalOverlay's own `overflow: visible` (specificity 0,3,0) historically
+   defeated per-panel clamps (the old Settings bug). Glow via box-shadow is
+   not clipped by overflow, so the holo treatment survives. */
+.nge-overlay.modal.overlay-content {
+  max-height: calc(100vh - 24px) !important;
+  max-width: calc(100vw - 24px) !important;
+  overflow: auto !important;
+  box-sizing: border-box;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
