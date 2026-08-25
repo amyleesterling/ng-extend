@@ -15,6 +15,7 @@
  */
 // The neuron glyph, same as the top bar's Cell Library icon. Connectomics,
 // not genomics: never the DNA emoji (Amy 2026-08-18).
+import { computed } from 'vue';
 import neuronIcon from '../../static/badges/pyr/neuron-icon-white.png';
 
 /** loggedIn: after login the systems list becomes interactive links
@@ -27,7 +28,16 @@ import neuronIcon from '../../static/badges/pyr/neuron-icon-white.png';
  *  logged-in visitor; rendering the login button in that window makes it
  *  appear and then vanish a second later (Amy 2026-08-24). Until checked,
  *  the section shows a quiet verifying line instead of either state. */
-defineProps<{ show: boolean, loggedIn: boolean, loginChecked?: boolean, userName?: string }>();
+const props = defineProps<{ show: boolean, loggedIn: boolean, loginChecked?: boolean, userName?: string }>();
+
+/** Greeting matches who's there: a stranger is a citizen, a logged-in
+ *  player is greeted by first name (or as a citizen scientist when the
+ *  auth server gave us no name) — Amy 2026-08-24. */
+const greeting = computed(() => {
+  if (!props.loggedIn) return 'Welcome, citizen';
+  const first = props.userName?.trim().split(/\s+/)[0];
+  return first ? `Welcome, ${first}` : 'Welcome, citizen scientist';
+});
 
 const emit = defineEmits<{
   (e: 'hide'): void;
@@ -108,7 +118,7 @@ function shareEmail() {
         <!-- ── Home ── -->
         <div class="nge-mw-body">
           <div class="nge-mw-kicker">MOBILE UPLINK · LIMITED BANDWIDTH</div>
-          <h2 class="nge-mw-title">Welcome, citizen</h2>
+          <h2 class="nge-mw-title">{{ greeting }}</h2>
           <p class="nge-mw-copy">
             The full EyeWire II brain mapping interface needs a bigger
             screen. But your phone still has clearance. Start here:
@@ -117,7 +127,8 @@ function shareEmail() {
           <button class="nge-mw-learn" @click="openLearn">
             <span class="nge-mw-learn-icon">🧠</span>
             <span class="nge-mw-learn-text">
-              <span class="nge-mw-learn-title">What is a brain anyway?</span>
+              <!-- The playful "anyway" is for strangers; players get the tidy title. -->
+              <span class="nge-mw-learn-title">{{ loggedIn ? 'What is a brain?' : 'What is a brain anyway?' }}</span>
               <span class="nge-mw-learn-sub">Neuroscience 101</span>
             </span>
             <span class="nge-mw-learn-arrow">›</span>
