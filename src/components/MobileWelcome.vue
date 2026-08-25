@@ -15,8 +15,9 @@
  */
 // The neuron glyph, same as the top bar's Cell Library icon. Connectomics,
 // not genomics: never the DNA emoji (Amy 2026-08-18).
-import { computed } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import neuronIcon from '../../static/badges/pyr/neuron-icon-white.png';
+import NeuronGlyph from 'components/NeuronGlyph.vue';
 
 /** loggedIn: after login the systems list becomes interactive links
  *  (tap Profile on the Guide to open the profile panel, etc.).
@@ -63,6 +64,42 @@ const SYSTEMS: { id: PanelId; icon: string; label: string; sub: string }[] = [
 
 function dismiss() {
   emit('hide');
+}
+
+// ── Spinnable cell ────────────────────────────────────────────────────────
+// A tiny rotating neuron (the login box's glyph) at the top of the sheet.
+// It idles in a slow spin; dragging spins it directly and a flick leaves
+// momentum that eases back to the idle rate (Amy 2026-08-25).
+const spinAngle = ref(0);
+const IDLE_VEL = 0.35;               // deg per frame ≈ 21°/s
+let spinVel = IDLE_VEL;
+let spinDragging = false;
+let spinLastX = 0;
+let spinRaf = 0;
+function spinTick() {
+  if (!spinDragging) {
+    spinAngle.value = (spinAngle.value + spinVel) % 360;
+    spinVel += (IDLE_VEL - spinVel) * 0.03;  // momentum eases to idle
+  }
+  spinRaf = requestAnimationFrame(spinTick);
+}
+onMounted(() => { spinRaf = requestAnimationFrame(spinTick); });
+onUnmounted(() => cancelAnimationFrame(spinRaf));
+function spinStart(e: PointerEvent) {
+  spinDragging = true;
+  spinLastX = e.clientX;
+  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+}
+function spinMove(e: PointerEvent) {
+  if (!spinDragging) return;
+  const dx = e.clientX - spinLastX;
+  spinLastX = e.clientX;
+  spinAngle.value = (spinAngle.value + dx * 0.6) % 360;
+  spinVel = dx * 0.6;
+}
+function spinEnd() {
+  spinDragging = false;
+  spinVel = Math.max(-7, Math.min(7, spinVel));
 }
 
 // Portal social-proof line. Three candidate copies were wired as an A/B/C
@@ -114,6 +151,13 @@ function shareEmail() {
 
         <!-- ── Home ── -->
         <div class="nge-mw-body">
+          <div class="nge-mw-spin-stage" aria-hidden="true"
+              @pointerdown="spinStart" @pointermove="spinMove"
+              @pointerup="spinEnd" @pointercancel="spinEnd">
+            <div class="nge-mw-spin" :style="{ transform: `rotateX(8deg) rotateY(${spinAngle}deg)` }">
+              <NeuronGlyph />
+            </div>
+          </div>
           <div class="nge-mw-kicker">MOBILE UPLINK · LIMITED BANDWIDTH</div>
           <h2 class="nge-mw-title">{{ greeting }}</h2>
           <p class="nge-mw-copy">
@@ -217,6 +261,29 @@ function shareEmail() {
 </template>
 
 <style>
+/* No visible scrollbars on the landing box — it still scrolls by touch
+   when content overflows a short screen (Amy 2026-08-25). */
+.nge-mw-sheet { scrollbar-width: none; -ms-overflow-style: none; }
+.nge-mw-sheet::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* Spinnable cell: perspective stage; the glyph coin-spins on Y. */
+.nge-mw-spin-stage {
+  width: 76px;
+  height: 64px;
+  margin: 0 auto 2px;
+  perspective: 320px;
+  touch-action: none;
+  cursor: grab;
+}
+.nge-mw-spin-stage:active { cursor: grabbing; }
+.nge-mw-spin {
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  will-change: transform;
+  filter: drop-shadow(0 0 10px rgba(24, 207, 255, 0.35));
+}
+
 .nge-mw-blocker {
   position: fixed;
   inset: 0;
