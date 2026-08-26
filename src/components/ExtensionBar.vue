@@ -15,6 +15,7 @@ import CellLibraryPanel from "components/CellLibraryPanel.vue";
 import ChatPanel from "components/ChatPanel.vue";
 import AssistantDock from "components/AssistantDock.vue";
 import { runSpotlight } from "../assistant/spotlight";
+import { showDefaultCell } from "../widgets/widget_utils";
 import BatchProcessorPanel from "components/BatchProcessorPanel.vue";
 import TagModePanel from "components/TagModePanel.vue";
 import FlightMode from "components/FlightMode.vue";
@@ -24,6 +25,7 @@ import DatasetSelectorPanel from "components/DatasetSelectorPanel.vue";
 import ScreenshotDialog from "components/ScreenshotDialog.vue";
 import UsernamePrompt from "components/UsernamePrompt.vue";
 import MobileWelcome from "components/MobileWelcome.vue";
+import MobileTour from "components/MobileTour.vue";
 import {isMobileRef, mobileWelcomeOpenRef} from '../util/mobile';
 import neuronIcon from '../../static/badges/pyr/neuron-icon-white.png';
 import pyrIcon from '../../static/badges/pyr/pyr-icon.png';
@@ -296,6 +298,26 @@ function hideMobileWelcome() {
 function exploreWithoutLogin() {
   hideMobileWelcome();
   document.dispatchEvent(new CustomEvent('nge:dismiss-login'));
+  // Exploring without logging in used to land on the empty forced-3D view
+  // — a black screen (Amy 2026-08-25). Show the dataset's showcase cell and
+  // run the phone-sized tour, once per browser (the Guide's Take the tour
+  // link replays it).
+  setTimeout(() => showDefaultCell(), 400);
+  try {
+    if (localStorage.getItem(MOBILE_TOUR_SEEN_KEY) === '1') return;
+    localStorage.setItem(MOBILE_TOUR_SEEN_KEY, '1');
+  } catch { /* private mode: run it, better than a silent blank */ }
+  setTimeout(() => { showMobileTour.value = true; }, 900);
+}
+
+const MOBILE_TOUR_SEEN_KEY = 'nge_mobile_tour_seen_v1';
+const showMobileTour = ref(false);
+/** Guide sheet's "Take the tour" — replay on demand. */
+function startMobileTour() {
+  hideMobileWelcome();
+  document.dispatchEvent(new CustomEvent('nge:dismiss-login'));
+  setTimeout(() => showDefaultCell(), 300);
+  setTimeout(() => { showMobileTour.value = true; }, 700);
 }
 /** "Log in" on the sheet: close it and start auth right away. The dispatch
  *  is synchronous, so LoginModal's window.open still runs inside this tap's
@@ -963,29 +985,32 @@ function activateTool(toolType: 'multicut' | 'merge' | 'findPath') {
     :user-name="validLogins[0]?.name"
     @hide="exploreWithoutLogin"
     @login="mobileWelcomeLogin"
+    @tour="startMobileTour"
     @open="mobileOpenPanel"
   />
+  <mobile-tour v-if="isMobileRef" :show="showMobileTour" :logged-in="validLogins.length > 0"
+    @finish="showMobileTour = false" />
   <teleport to="body">
   <nav v-if="isMobileRef" class="nge-mobile-nav">
-    <button :class="{ 'nge-mnav--active': showCellLibrary }" @click="mobileNavTap('cells')">
+    <button :class="{ 'nge-mnav--active': showCellLibrary }" data-mnav="cells" @click="mobileNavTap('cells')">
       <span class="nge-mnav-icon"><img :src="neuronIcon" class="nge-mnav-neuron" alt="" /></span>
       <span class="nge-mnav-label">Cells</span>
     </button>
-    <button :class="{ 'nge-mnav--active': showChat }" @click="mobileNavTap('chat')">
+    <button :class="{ 'nge-mnav--active': showChat }" data-mnav="chat" @click="mobileNavTap('chat')">
       <span class="nge-mnav-icon">💬</span>
       <span class="nge-mnav-label">Chat</span>
       <span v-if="chatStore.unreadCount > 0" class="nge-mnav-badge">{{ chatStore.unreadCount }}</span>
     </button>
-    <button :class="{ 'nge-mnav--active': showTagMode }" @click="showTagMode = !showTagMode">
+    <button :class="{ 'nge-mnav--active': showTagMode }" data-mnav="tags" @click="showTagMode = !showTagMode">
       <span class="nge-mnav-icon">📍</span>
       <span class="nge-mnav-label">Tags</span>
     </button>
-    <button :class="{ 'nge-mnav--active': showNotifications }" @click="showNotifications = !showNotifications">
+    <button :class="{ 'nge-mnav--active': showNotifications }" data-mnav="alerts" @click="showNotifications = !showNotifications">
       <span class="nge-mnav-icon">🔔</span>
       <span class="nge-mnav-label">Alerts</span>
       <span v-if="backendStore.unreadNotificationCount > 0" class="nge-mnav-badge">{{ backendStore.unreadNotificationCount }}</span>
     </button>
-    <button :class="{ 'nge-mnav--active': showMobileWelcome }" @click="showMobileWelcome = true">
+    <button :class="{ 'nge-mnav--active': showMobileWelcome }" data-mnav="guide" @click="showMobileWelcome = true">
       <span class="nge-mnav-icon">✨</span>
       <span class="nge-mnav-label">Guide</span>
     </button>
