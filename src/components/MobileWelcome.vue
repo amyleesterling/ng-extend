@@ -70,16 +70,30 @@ function dismiss() {
 // A tiny rotating neuron (the login box's glyph) at the top of the sheet.
 // It idles in a slow spin; dragging spins it directly and a flick leaves
 // momentum that eases back to the idle rate (Amy 2026-08-25).
+// The glyph is a flat SVG, so a full 360° Y-spin passes edge-on and
+// vanishes to a line (Amy 2026-08-25). It swings instead: a slow
+// sinusoidal turn that always keeps a face to the viewer, and drags are
+// clamped short of edge-on.
+const SPIN_LIMIT = 62;               // degrees either side of face-on
 const spinAngle = ref(0);
-const IDLE_VEL = 0.35;               // deg per frame ≈ 21°/s
-let spinVel = IDLE_VEL;
+let spinPhase = 0;
+let spinVel = 0;                     // drag/flick velocity, deg per frame
 let spinDragging = false;
 let spinLastX = 0;
 let spinRaf = 0;
+const clampSpin = (a: number) => Math.max(-SPIN_LIMIT, Math.min(SPIN_LIMIT, a));
 function spinTick() {
   if (!spinDragging) {
-    spinAngle.value = (spinAngle.value + spinVel) % 360;
-    spinVel += (IDLE_VEL - spinVel) * 0.03;  // momentum eases to idle
+    if (Math.abs(spinVel) > 0.05) {
+      // Coast out a flick, then hand back to the idle swing.
+      spinAngle.value = clampSpin(spinAngle.value + spinVel);
+      spinVel *= 0.94;
+      spinPhase = Math.asin(clampSpin(spinAngle.value) / SPIN_LIMIT);
+    } else {
+      spinVel = 0;
+      spinPhase += 0.008;            // ≈ 13s per full swing cycle
+      spinAngle.value = Math.sin(spinPhase) * SPIN_LIMIT;
+    }
   }
   spinRaf = requestAnimationFrame(spinTick);
 }
@@ -94,7 +108,7 @@ function spinMove(e: PointerEvent) {
   if (!spinDragging) return;
   const dx = e.clientX - spinLastX;
   spinLastX = e.clientX;
-  spinAngle.value = (spinAngle.value + dx * 0.6) % 360;
+  spinAngle.value = clampSpin(spinAngle.value + dx * 0.6);
   spinVel = dx * 0.6;
 }
 function spinEnd() {
@@ -162,7 +176,7 @@ function shareEmail() {
           <h2 class="nge-mw-title">{{ greeting }}</h2>
           <p class="nge-mw-copy">
             The full EyeWire II brain mapping interface needs a bigger
-            screen. But your phone still has clearance. Start here:
+            screen. But your phone still has partial clearance. Start here:
           </p>
 
           <button class="nge-mw-learn" @click="openLearn">
