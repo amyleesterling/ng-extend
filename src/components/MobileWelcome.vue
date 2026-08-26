@@ -191,7 +191,27 @@ function shareEmail() {
             <span class="nge-mw-learn-arrow">›</span>
           </button>
           <button class="nge-mw-learn" @click="openAtlas">
-            <span class="nge-mw-learn-icon">🕸️</span>
+            <!-- Connectomics, not arachnids: a wiring diagram — neurons as
+                 nodes, synaptic connections as edges (Amy 2026-08-25). -->
+            <span class="nge-mw-learn-icon nge-mw-learn-icon--svg">
+              <svg viewBox="0 0 24 24" class="nge-mw-net" aria-hidden="true">
+                <g stroke="#18cfff" stroke-linecap="round" fill="none">
+                  <path d="M5 6 L12 4 M12 4 L19 7 M5 6 L11 12 M12 4 L11 12 M19 7 L11 12"
+                        stroke-width="1.1" opacity="0.55"/>
+                  <path d="M11 12 L4 15 M11 12 L18 17 M4 15 L9 20 M9 20 L18 17 M11 12 L9 20"
+                        stroke-width="1.1" opacity="0.45"/>
+                </g>
+                <g fill="#4ad8ff">
+                  <circle cx="5" cy="6" r="1.6" opacity="0.85"/>
+                  <circle cx="12" cy="4" r="1.4" opacity="0.75"/>
+                  <circle cx="19" cy="7" r="1.5" opacity="0.8"/>
+                  <circle cx="4" cy="15" r="1.4" opacity="0.7"/>
+                  <circle cx="18" cy="17" r="1.6" opacity="0.8"/>
+                  <circle cx="9" cy="20" r="1.3" opacity="0.65"/>
+                  <circle cx="11" cy="12" r="2.5" fill="#8ceaff"/>
+                </g>
+              </svg>
+            </span>
             <span class="nge-mw-learn-text">
               <span class="nge-mw-learn-title">What is a connectome?</span>
               <span class="nge-mw-learn-sub">The greatest map humans have ever drawn</span>
@@ -504,6 +524,11 @@ function shareEmail() {
 }
 .nge-mw-learn:active { border-color: rgba(53, 181, 255, 0.6); }
 .nge-mw-learn-icon { font-size: 24px; }
+.nge-mw-learn-icon--svg { display: inline-flex; align-items: center; justify-content: center; }
+.nge-mw-net {
+  width: 26px; height: 26px; display: block;
+  filter: drop-shadow(0 0 5px rgba(24, 207, 255, 0.55));
+}
 .nge-mw-learn-text {
   display: flex;
   flex-direction: column;
