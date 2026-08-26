@@ -44,6 +44,8 @@ const emit = defineEmits<{
   (e: 'hide'): void;
   /** Close the sheet and let identity verification take the stage. */
   (e: 'login'): void;
+  /** Replay the phone-sized tour from the sheet. */
+  (e: 'tour'): void;
   (e: 'open', panel: 'cells' | 'chat' | 'profile' | 'leaderboard'): void;
 }>();
 
@@ -265,6 +267,9 @@ function shareEmail() {
 
           <button class="nge-mw-bypass" @click="dismiss">
             JUST EXPLORING · ENTER THE FULL COCKPIT ›
+          </button>
+          <button class="nge-mw-bypass nge-mw-tour-link" @click="emit('tour')">
+            TAKE THE TOUR ›
           </button>
         </div>
 
@@ -564,6 +569,7 @@ function shareEmail() {
   cursor: pointer;
 }
 .nge-mw-bypass:active { color: rgb(53, 181, 255); }
+.nge-mw-tour-link { margin-top: 0; padding-top: 2px; color: rgba(53, 181, 255, 0.8); }
 
 
 

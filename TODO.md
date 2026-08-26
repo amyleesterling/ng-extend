@@ -25,7 +25,15 @@ too thin to measure yet (Amy, 2026-08-24). When there are enough visitors:
 - Keep the numbers honest when reviving — refresh the neuron counts against
   real stats at that point.
 
-## Mobile onboarding tour
+## Mobile onboarding tour — SHIPPED 2026-08-25 (MobileTour.vue)
+
+Built as a 6-step caption-card flow over the bottom nav: viewer, Cells,
+Chat, Tags, Alerts, Guide. Runs once per browser on "Just exploring" and
+replays from the sheet's "Take the tour". Step one adapts to login state
+because meshes need CAVE auth. Possible follow-ups: deep-link each step
+into its panel, and a post-login variant that walks a real cell.
+
+### Original note
 
 Make a phone-sized version of the tutorial that shows new mobile users
 around the few things they can preview on a phone (Amy 2026-08-24): the
