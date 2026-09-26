@@ -38,6 +38,8 @@ export const DATASETS: DatasetEntry[] = [
     abbrev: 'Retina',
     species: 'mouse',
     description: 'EyeWire II — mouse retinal connectome (16×16×40 nm)',
+    // connectome.quest's EyeWire II card image ("EyeWire II, mouse retina neurons").
+    banner: 'https://connectome.quest/assets/images/e2_banner.jpg',
     layers: [
       {
         type: 'image',
@@ -86,6 +88,8 @@ export const DATASETS: DatasetEntry[] = [
     abbrev: 'MICrONS',
     species: 'mouse',
     description: 'MICrONS — 1mm³ mouse visual cortex (8×8×40 nm)',
+    // connectome.quest's MICrONS card image (minnie65 cortical layers).
+    banner: 'https://connectome.quest/assets/images/microns-layers-brightened.jpg',
     layers: [
       {
         type: 'image',
@@ -116,6 +120,7 @@ export const DATASETS: DatasetEntry[] = [
     // datastack minnie65_public). minnie65_phase3_v1 is a datastack /
     // aligned-volume name, NOT a graphene table: using it as one 400s.
     description: 'MICrONS minnie65 on the rolling public graph — where the AI merge-candidate roots resolve',
+    banner: 'https://connectome.quest/assets/images/microns-layers-brightened.jpg',
     layers: [
       {
         type: 'image',
