@@ -337,7 +337,7 @@ function dragMove(e: PointerEvent) {
   const w = document.documentElement.clientWidth;
   const h = document.documentElement.clientHeight;
   panelPos.value = {
-    left: Math.min(Math.max(8 - 340, e.clientX - dragOff.x), w - 60),
+    left: Math.min(Math.max(8 - 380, e.clientX - dragOff.x), w - 60),
     top: Math.min(Math.max(44, e.clientY - dragOff.y), h - 60),
   };
 }
@@ -480,6 +480,7 @@ onBeforeUnmount(() => {
           <button class="nge-tagmode-close" title="Exit tag mode (Esc)" @pointerdown.stop @click="closeWithZip">×</button>
         </div>
         <div class="nge-tagmode-hint">
+          <div class="nge-tagmode-lede">Tag a spot for another player to review.</div>
           Pick a type, then <b>hold T and click</b> the spot, or <b>tap T</b> to arm Click to tag. <b>Submit</b> saves it.
         </div>
         <div class="nge-tagmode-chips">
@@ -573,7 +574,8 @@ onBeforeUnmount(() => {
 .nge-tagmode-wrap {
   position: fixed;
   z-index: 10005;
-  width: 340px;
+  /* 380 (was 340): the form felt crowded (Amy 2026-09-25). */
+  width: 380px;
   max-width: calc(100vw - 24px);
 }
 
@@ -585,7 +587,7 @@ onBeforeUnmount(() => {
   position: relative;
   max-height: calc(100vh - 90px);
   overflow-y: auto;
-  padding: 12px 14px;
+  padding: 16px 18px 18px;
   border-radius: 10px;
   background: rgba(6, 10, 20, 0.95);
   border: 1px solid rgba(245, 209, 66, 0.35);
@@ -593,7 +595,7 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(8px);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   font-family: 'Inter', 'Segoe UI', sans-serif;
   animation: nge-holo-materialize 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -781,7 +783,9 @@ onBeforeUnmount(() => {
   line-height: 1; cursor: pointer; padding: 0 2px;
 }
 .nge-tagmode-close:hover { color: #fff; }
-.nge-tagmode-hint { font-size: 11px; color: rgba(255, 255, 255, 0.55); line-height: 1.45; }
+.nge-tagmode-hint { font-size: 11.5px; color: rgba(255, 255, 255, 0.6); line-height: 1.5; }
+.nge-tagmode-lede { font-size: 13px; font-weight: 600; color: #eef3fb; margin-bottom: 4px; }
+.nge-tagmode-chips { gap: 8px !important; }
 .nge-tagmode-hint b { color: #f5d142; font-weight: 600; }
 .nge-tagmode-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .nge-tagmode-chip {
