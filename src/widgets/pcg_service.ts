@@ -1,3 +1,4 @@
+import {isSegLayer} from '../util/layer_kind';
 /**
  * pcg_service.ts
  * PyChunkedGraph API helpers for fetching edit/operation logs.
@@ -331,8 +332,7 @@ export function getSelectedSupervoxelId(): string | null {
     for (const ml of viewer?.layerManager?.managedLayers ?? []) {
       const layer = ml.layer;
       if (!layer) continue;
-      const typeName = layer.constructor?.name ?? '';
-      if (!typeName.includes('Segmentation')) continue;
+      if (!isSegLayer(ml)) continue;
       const selState = layer.displayState?.segmentSelectionState;
       if (selState?.hasSelectedSegment) {
         const base = selState.baseSelectedSegment;

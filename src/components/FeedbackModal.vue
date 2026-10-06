@@ -3,6 +3,7 @@ import { recentConsoleCount, recentConsoleText } from '../util/console_buffer';
 import { caveToken } from '../secure_write';
 import { reportFeedbackFailure } from '../util/error_reporting';
 import { functionUrl } from '../functions_base';
+import { isSegLayer } from '../util/layer_kind';
 /**
  * FeedbackModal.vue
  * "Submit an issue" — lets any user report a bug / idea / data problem from
@@ -78,7 +79,7 @@ function currentDataset(): string {
   try {
     const viewer = (window as any)['viewer'];
     for (const ml of viewer?.layerManager?.managedLayers ?? []) {
-      if ((ml.layer?.constructor?.name ?? '').includes('Segmentation')) return ml.name ?? '';
+      if (isSegLayer(ml)) return ml.name ?? '';
     }
   } catch {}
   return '';

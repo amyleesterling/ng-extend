@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {computed, onMounted, onUnmounted, ref, watch} from "vue";
+import {isSegLayer} from "../util/layer_kind";
 import VolumesOverlay from "components/VolumesOverlay.vue";
 import DropdownList from "components/DropdownList.vue";
 import UserProfilePanel from "components/UserProfilePanel.vue";
@@ -777,7 +778,7 @@ function activateTool(toolType: 'multicut' | 'merge' | 'findPath') {
   // 1. Select the segmentation layer (required for tool keybindings)
   try {
     const segLayer = viewer.layerManager?.managedLayers?.find(
-      (x: any) => x.layer?.constructor?.name?.includes('Segmentation'),
+      isSegLayer,
     );
     if (segLayer) {
       viewer.selectedLayer.layer = segLayer;

@@ -16,6 +16,7 @@ import {
 } from '../store';
 import { setCellComplete, activeCaveServer, getLastCompletionProblem } from '../widgets/lightbulb_service';
 import { StatusMessage } from 'neuroglancer/status';
+import { isSegLayer } from '../util/layer_kind';
 import { CONNECTOME_QUEST_RESOURCES } from '../data/connectome-quest';
 
 const emit = defineEmits({
@@ -234,7 +235,7 @@ function buildActions(): PaletteItem[] {
       try {
         const viewer = (window as any)['viewer'];
         const segLayer = viewer?.layerManager?.managedLayers?.find(
-          (x: any) => x.layer?.constructor?.name?.includes('Segmentation'),
+          isSegLayer,
         );
         const gs = segLayer?.layer?.displayState?.segmentationGroupState?.value;
         gs?.visibleSegments?.clear?.();
@@ -586,7 +587,7 @@ function activateTool(toolType: 'multicut' | 'merge') {
   if (!viewer) return;
   try {
     const segLayer = viewer.layerManager?.managedLayers?.find(
-      (x: any) => x.layer?.constructor?.name?.includes('Segmentation'),
+      isSegLayer,
     );
     if (segLayer) {
       viewer.selectedLayer.layer = segLayer;

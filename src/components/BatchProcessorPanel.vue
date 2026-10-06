@@ -6,6 +6,7 @@
  */
 import { ref, computed, onMounted } from 'vue';
 import { Uint64 } from 'neuroglancer/util/uint64';
+import { isSegLayer } from '../util/layer_kind';
 import { setStatedColor } from '../widgets/widget_utils';
 import { setCellComplete, saveCellType, activeCaveServer, NURRO_IMAGES } from '../widgets/lightbulb_service';
 import { planMenuCompletion, finishMenuCompletion, clearOwnAnnotations } from '../util/menu_complete';
@@ -91,8 +92,7 @@ function currentDataset(): string {
   try {
     const viewer = (window as any)['viewer'];
     for (const ml of viewer?.layerManager?.managedLayers ?? []) {
-      const typeName = ml.layer?.constructor?.name ?? '';
-      if (typeName.includes('Segmentation')) return ml.name ?? '';
+      if (isSegLayer(ml)) return ml.name ?? '';
       const url = ml.layer?.dataSources?.[0]?.spec?.url ?? '';
       if (url.includes('graphene') || url.includes('segmentation')) return ml.name ?? '';
     }

@@ -2,6 +2,7 @@ import { startViewAutosave } from './util/view_autosave';
 import { startSegmentationServerWatch } from './util/segmentation_server_watch';
 import { installScriptApi } from './script_api';
 import { startHighlightTint } from './util/highlight';
+import { isSegLayer } from './util/layer_kind';
 import {createApp, nextTick} from 'vue';
 import {createPinia} from 'pinia';
 import {installConsoleBuffer} from './util/console_buffer';
@@ -256,8 +257,7 @@ function autoSelectSegLayer(viewer: any, attempt = 0) {
 
       const segLayer = viewer.layerManager.managedLayers.find(
         (l: any) => {
-          const typeName = l.layer?.constructor?.name ?? '';
-          if (typeName.includes('Segmentation')) return true;
+          if (isSegLayer(l)) return true;
           const url = l.layer?.dataSources?.[0]?.spec?.url ?? '';
           return url.includes('graphene') || url.includes('segmentation');
         },

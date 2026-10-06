@@ -1,4 +1,5 @@
 import { Step, useTutorialStore } from "./store-pyr";
+import { isAnnotationLayer, isSegLayer } from "./util/layer_kind";
 import { ngePointScale } from "neuroglancer/annotation/point";
 // The saved views name this neuron by its OLD root ids on purpose: they
 // still show it as it was before the continuation was merged in (March
@@ -26,8 +27,7 @@ function setAnnotationColor(color: string) {
   const layers = viewer.layerManager && viewer.layerManager.managedLayers;
   if (!layers) return;
   for (const ml of layers) {
-    const name = ml.layer && ml.layer.constructor && ml.layer.constructor.name;
-    if (name && (name as string).indexOf('Annotation') >= 0) {
+    if (isAnnotationLayer(ml)) {
       try { ml.layer.annotationColor.value = color; } catch (e) { /* */ }
     }
   }
@@ -70,8 +70,7 @@ function removeSegment(segId: string) {
   if (!layers) return;
   for (const ml of layers) {
     const layer = ml.layer;
-    const name = layer && layer.constructor && layer.constructor.name;
-    if (name && (name as string).indexOf('Segmentation') >= 0) {
+    if (isSegLayer(ml)) {
       const rootSegs = layer.displayState?.segmentationGroupState?.value?.visibleSegments
         ?? layer.displayState?.rootSegments;
       if (rootSegs) {
@@ -308,8 +307,7 @@ This box won't go away when you click outside it.`,
         const layers = viewer.layerManager && viewer.layerManager.managedLayers;
         if (layers) {
           for (let i = layers.length - 1; i >= 0; i--) {
-            const n = layers[i].layer && layers[i].layer.constructor && layers[i].layer.constructor.name;
-            if (n && (n as string).indexOf('Annotation') >= 0) {
+            if (isAnnotationLayer(layers[i])) {
               layers[i].setVisible(false);
               try { viewer.layerManager.removeManagedLayer(layers[i]); } catch (e) { /* */ }
             }

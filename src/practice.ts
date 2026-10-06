@@ -20,6 +20,7 @@ import { practiceAction } from './pilot_actions';
 import { Uint64 } from 'neuroglancer/util/uint64';
 import { setStatedColor } from './widgets/widget_utils';
 import { supabase } from './supabase';
+import { isSegLayer } from './util/layer_kind';
 import { practiceBase, practiceToken } from './util/practice_destination';
 import { practiceOperationsAfter, remainingPracticeOperations } from './util/practice_history';
 export { parsePcgStamp } from './util/practice_history';
@@ -287,7 +288,7 @@ export function ensureTool(tool: 'merge' | 'multicut', attempt = 0) {
   // loading, so keep trying for a few seconds until the tool bar is up.
   if (attempt < 8) setTimeout(() => ensureTool(tool, attempt + 1), 700);
   try {
-    const seg = viewer.layerManager?.managedLayers?.find((x: any) => x.layer?.constructor?.name?.includes('Segmentation'));
+    const seg = viewer.layerManager?.managedLayers?.find(isSegLayer);
     if (seg) { viewer.selectedLayer.layer = seg; viewer.selectedLayer.visible = true; }
   } catch { /* non-critical */ }
   const key = tool === 'multicut' ? 'c' : 'm';

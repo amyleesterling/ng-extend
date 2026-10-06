@@ -1,4 +1,5 @@
 import { Step } from "./store-pyr";
+import { isAnnotationLayer } from "./util/layer_kind";
 // 132KB web-sized JPEG; the 18MB source PNG stays out of the bundle.
 import scytheHero from './images/scythe_hero_web.jpg';
 import imgWheresNurro from './images/wheres-nurro.png';
@@ -402,7 +403,7 @@ Great! Click the "○" button to select the single point annotation.
       try {
         const viewer = (window as any).viewer;
         for (const ml of viewer?.layerManager?.managedLayers ?? []) {
-          if (ml.layer?.constructor?.name?.includes('Annotation')) {
+          if (isAnnotationLayer(ml)) {
             const color = ml.layer.annotationDisplayState?.color;
             if (color) color.restoreState('#ffd700');
             break;

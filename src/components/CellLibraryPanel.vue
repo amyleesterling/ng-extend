@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { reportWriteFailure } from '../util/error_reporting';
+import { isSegLayer } from '../util/layer_kind';
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { snapshotPanel, morphIntoSlim, revealWithBeam, whenSettled } from '../util/panel_collapse';
 import {
@@ -1694,8 +1695,7 @@ function getVisibleSegmentIds(): string[] {
     for (const ml of viewer?.layerManager?.managedLayers ?? []) {
       const layer = ml.layer;
       if (!layer) continue;
-      const className = layer.constructor?.name || '';
-      if (!className.includes('Segmentation')) continue;
+      if (!isSegLayer(ml)) continue;
       const visible = layer.displayState?.segmentationGroupState?.value?.visibleSegments;
       if (!visible) continue;
       const ids: string[] = [];

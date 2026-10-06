@@ -6,6 +6,7 @@
  */
 import { ref, computed, watch, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
+import { isSegLayer } from '../util/layer_kind';
 import { useSegmentAnnotationStore, useUserStatsStore, useCellHistoryStore, useHelpRequestStore } from '../store';
 import { getCellStatus, setCellComplete, saveCellType, CellStatus, getLastCompletionProblem } from '../widgets/lightbulb_service';
 import { getChangeLog, ChangeLogSummary } from '../widgets/pcg_service';
@@ -33,8 +34,7 @@ function getCurrentDataset(): string {
     const viewer = (window as any)['viewer'];
     for (const ml of viewer?.layerManager?.managedLayers ?? []) {
       // Check layer type name (works even if dataSources haven't loaded)
-      const typeName = ml.layer?.constructor?.name ?? '';
-      if (typeName.includes('Segmentation')) return ml.name ?? '';
+      if (isSegLayer(ml)) return ml.name ?? '';
       // Fallback: check URL
       const url = ml.layer?.dataSources?.[0]?.spec?.url ?? '';
       if (url.includes('graphene') || url.includes('segmentation')) return ml.name ?? '';

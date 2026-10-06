@@ -1,6 +1,7 @@
 import {formatScaleWithUnit} from "neuroglancer/util/si_units";
 import {Uint64} from "neuroglancer/util/uint64";
 import {getDatasetCaveConfig} from "../config";
+import {isSegLayer} from "../util/layer_kind";
 
 export const getLayerScales = (coordinateSpace: any) => {
     let scales = new Float32Array(coordinateSpace.value?.scales.length);
@@ -42,7 +43,7 @@ export function showDefaultCell(retryAttempts = 5): void {
   try {
     const viewer: any = (window as any)['viewer'];
     const segLayer = viewer?.layerManager?.managedLayers?.find(
-      (l: any) => l.layer?.constructor?.name?.includes('Segmentation'),
+      isSegLayer,
     );
     if (!viewer || !segLayer?.layer) {
       if (retryAttempts > 0) setTimeout(() => showDefaultCell(retryAttempts - 1), 1500);
@@ -84,7 +85,7 @@ export function openSegPanel(retryAttempts = 3): void {
     const viewer: any = (window as any)['viewer'];
     if (!viewer) return;
     const segLayer = viewer.layerManager.managedLayers.find(
-      (l: any) => l.layer?.constructor?.name?.includes('Segmentation'),
+      isSegLayer,
     );
     if (!segLayer) {
       if (retryAttempts > 0) {
