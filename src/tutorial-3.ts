@@ -15,6 +15,7 @@ import { useSplitMergeOverlayStore } from './store';
 import { watch } from 'vue';
 import { hidePyrMarkers, showPyrMarkers } from './markers';
 import { drawSearchLine } from './tutorial_pointer';
+import { canonicalDataset, currentSegLayerName } from './datasets';
 import { defaultCredentialsManager } from 'neuroglancer/credentials_provider/default_manager';
 import { responseJson } from 'neuroglancer/util/http_request';
 import { cancellableFetchSpecialOk, parseSpecialUrl } from 'neuroglancer/util/special_protocol_request';
@@ -473,7 +474,7 @@ document.addEventListener('nge:tutorial-layer-note', () => {
   if (!chip) return;
   if (!chip.querySelector('.nge-practice-layer-note')) {
     const note = notePanel('nge-practice-layer-note',
-      'The <b>segmentation layer</b> is the chip at the top of the viewer that is flashing now, named <b>3D segmentation</b>, next to <b>2D EM Images</b>. '
+      'The <b>segmentation layer</b> is the chip at the top of the viewer that is flashing now, named <b>3D segmentation</b>, next to <b>2D EM</b>. '
       + 'Press <kbd>2</kbd>, or right-click that chip, to select it. Tools like merge and cut only work on the selected layer.');
     chip.appendChild(note);
     document.dispatchEvent(new CustomEvent('nge:tutorial-reclamp'));
@@ -490,20 +491,35 @@ document.addEventListener('nge:tutorial-layer-note', () => {
 
 function segLayerChip(): HTMLElement | undefined {
   const layers: any[] = getViewer()?.layerManager?.managedLayers ?? [];
-  const seg = layers.find(ml => (ml.layer?.constructor?.name ?? '').includes('Segmentation'));
+  const seg = layers.find(ml => layerKind(ml).includes('segmentation'));
   const chips = Array.from(document.querySelectorAll('.neuroglancer-layer-panel .neuroglancer-layer-item')) as HTMLElement[];
   return (seg ? chips.find(c => (c.textContent ?? '').includes(seg.name)) : undefined) ?? chips[Math.max(0, layers.indexOf(seg))];
 }
 
 /**
- * Friendlier layer names while the Merge or Cut tutorial is up (Ames,
- * 2026-10-02): "2D EM Images" for img, "3D segmentation" for the dataset
- * layer. Display only: the layers keep their real names, which the app uses
- * to tell which dataset it is in. The real name stays in the chip's text
- * (hidden), a data attribute carries the shown one.
+ * Friendlier layer names on the Sandbox, and while the Merge or Cut tutorial
+ * is up (Ames, 2026-10-02 and 2026-10-06): "2D EM" for img, with the tooltip
+ * "Electron Microscope Images", and "3D segmentation" in place of
+ * pinky_nf_v2. Display only: the layers keep their real names, which the app
+ * uses to tell which dataset it is in. The real name stays in the chip's
+ * text (hidden), a data attribute carries the shown one.
  */
+/** What sort of layer this is. The live site is minified, so a layer's class
+ *  name is a letter or two there and never contains "Segmentation": these
+ *  names, and the flashing chip, only ever worked on a development build.
+ *  The layer's own type string survives minifying. */
+function layerKind(ml: any): string {
+  const l = ml?.layer;
+  return `${l?.constructor?.name ?? ''} ${l?.type ?? ''} ${l?.constructor?.type ?? ''}`.toLowerCase();
+}
+const FRIENDLY_TIPS: Record<string, string> = {
+  '2D EM': 'Electron Microscope Images',
+  '3D segmentation': 'The 3D reconstruction of every cell in the images',
+};
 function friendlyLayerNames() {
-  const on = [3, 5].includes(useTutorialStore().activeTutorial) && !!document.querySelector('.introductionStepAnchor');
+  const inTutorial = [3, 5].includes(useTutorialStore().activeTutorial) && !!document.querySelector('.introductionStepAnchor');
+  const onSandbox = canonicalDataset(currentSegLayerName()) === 'pinky_nf_v2';
+  const on = inTutorial || onSandbox;
   document.body.classList.toggle('nge-friendly-layers', on);
   if (!on) return;
   if (!document.getElementById('nge-friendly-layers-style')) {
@@ -517,12 +533,22 @@ function friendlyLayerNames() {
   const layers: any[] = getViewer()?.layerManager?.managedLayers ?? [];
   const chips = Array.from(document.querySelectorAll('.neuroglancer-layer-panel .neuroglancer-layer-item')) as HTMLElement[];
   for (const ml of layers) {
-    const kind = ml.layer?.constructor?.name ?? '';
-    const name = kind.includes('Segmentation') ? '3D segmentation' : kind.includes('Image') ? '2D EM Images' : '';
+    const kind = layerKind(ml);
+    const name = kind.includes('segmentation') ? '3D segmentation' : kind.includes('image') ? '2D EM' : '';
     const label = chips.find(c => (c.querySelector('.neuroglancer-layer-item-label')?.textContent ?? '') === ml.name)
       ?.querySelector('.neuroglancer-layer-item-label') as HTMLElement | null | undefined;
     if (!label) continue;
-    if (name) label.dataset.ngeLabel = name; else delete label.dataset.ngeLabel;
+    if (name) {
+      label.dataset.ngeLabel = name;
+      // The tooltip sits on the whole chip, so it shows wherever you hover it.
+      const chip = label.closest('.neuroglancer-layer-item') as HTMLElement | null;
+      if (chip) {
+        // Keep neuroglancer's own hint (how to switch the layer on and off) under ours.
+        if (chip.dataset.ngeOwnTip === undefined) chip.dataset.ngeOwnTip = chip.title || '';
+        const tip = FRIENDLY_TIPS[name] + (chip.dataset.ngeOwnTip ? String.fromCharCode(10) + chip.dataset.ngeOwnTip : '');
+        if (chip.title !== tip) chip.title = tip;
+      }
+    } else delete label.dataset.ngeLabel;
   }
 }
 setInterval(() => { try { friendlyLayerNames(); } catch { /* store not ready yet */ } }, 1000);
@@ -530,7 +556,7 @@ setInterval(() => { try { friendlyLayerNames(); } catch { /* store not ready yet
 document.addEventListener('nge:tutorial-flash-seg-layer', () => {
   const viewer = getViewer();
   const layers: any[] = viewer?.layerManager?.managedLayers ?? [];
-  const seg = layers.find(ml => (ml.layer?.constructor?.name ?? '').includes('Segmentation'));
+  const seg = layers.find(ml => layerKind(ml).includes('segmentation'));
   const chips = Array.from(document.querySelectorAll('.neuroglancer-layer-panel .neuroglancer-layer-item')) as HTMLElement[];
   // Match the chip by its label; fall back to the layer's index.
   let chip = seg ? chips.find(c => (c.textContent ?? '').includes(seg.name)) : undefined;
