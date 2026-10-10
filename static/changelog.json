@@ -3,9 +3,10 @@
   "entries": [
     {
       "at": "2026-10-10T16:54:00Z",
-      "title": "Chat: a clearer jump to a cell in another dataset",
+      "title": "Chat jumps by dataset name, and Highlight handles loops better",
       "items": [
-        "Clicking a cell ID from another dataset now says which dataset the cell is in, and the button takes you there by name."
+        "Clicking a cell ID from another dataset now says which dataset the cell is in, and the button takes you there by name.",
+        "Where a cell loops back on itself, To soma and Beyond in Highlight now follow the way that is shorter in distance along the cell."
       ]
     },
     {
