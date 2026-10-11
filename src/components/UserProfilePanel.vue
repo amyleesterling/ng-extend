@@ -8,10 +8,12 @@ import AdminHub from 'components/AdminHub.vue';
 import BlogEditor from 'components/BlogEditor.vue';
 import { startDatasetTransition } from '../util/dataset_transition';
 import { loadContribution, showsAllStats, datasetTagVariants as sharedTagVariants } from '../util/dataset_contribution';
+import { datasetKey } from '../util/completion_rule';
 import WeeklyRecapPanel from 'components/WeeklyRecapPanel.vue';
 import DatasetStatsPanel from 'components/DatasetStatsPanel.vue';
 import SettingsPanel from 'components/SettingsPanel.vue';
 import RollUp from 'components/RollUp.vue';
+import EffortCurve from 'components/EffortCurve.vue';
 import {loadRepoStats, BUILDER_USER_ID, type RepoStats} from '../util/repo_stats';
 import {getToolbarIconDef} from '../data/toolbar-icons';
 // The same drawing the top bar uses for Week in Science (Ames 2026-10-05).
@@ -839,13 +841,55 @@ const scopedEdits = ref<{ today: EditWindow; week: EditWindow; all: EditWindow }
 const scopedEditsFailed = ref(false);
 let scopedEditsReq = 0;
 
+// The same rows as a line (Ames 2026-10-11): one entry per day from the
+// first edit on this dataset to today, for the curve under the numbers.
+interface EffortDay { date: string; n: number }
+const scopedEditDays = ref<EffortDay[] | null>(null);
+
+// Cells completed on this dataset, the same three windows as edits, read
+// from the completions list (ew_cell_completions, one row per cell with the
+// moment it was completed, by the completed cell rule). Only the game's own
+// log: cells marked in other tools never count (Ames 2026-10-07).
+const scopedCells = ref<{ today: number; week: number; all: number } | null>(null);
+const scopedCellDays = ref<EffortDay[] | null>(null);
+const scopedCellsFailed = ref(false);
+let scopedCellsReq = 0;
+/** Zeros while loading, never another dataset's numbers. */
+const overviewCells = computed(() => scopedCells.value ?? { today: 0, week: 0, all: 0 });
+
+/** 'yyyy-mm-dd' on the player's own calendar: the day boundary the Today
+ *  window uses (start of today, local). */
+function localDay(t: number): string {
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+/** A dense run of days from the first stamp to today, zeros where nothing happened. */
+function denseDays(stamps: number[]): EffortDay[] {
+  if (!stamps.length) return [];
+  const counts = new Map<string, number>();
+  let first = Infinity;
+  for (const t of stamps) {
+    first = Math.min(first, t);
+    const k = localDay(t);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const out: EffortDay[] = [];
+  const d = new Date(first); d.setHours(0, 0, 0, 0);
+  const end = new Date(); end.setHours(0, 0, 0, 0);
+  for (; d.getTime() <= end.getTime(); d.setDate(d.getDate() + 1)) {
+    const k = localDay(d.getTime());
+    out.push({ date: k, n: counts.get(k) ?? 0 });
+  }
+  return out;
+}
+
 async function loadScopedEdits() {
   refreshActiveDatasetCanon();
   const uid = viewingOtherUser.value ? props.viewUserId : backendStore.userId;
   const canon = activeDatasetCanon.value;
   const req = ++scopedEditsReq;
   scopedEditsFailed.value = false;
-  if (!uid || !canon) { scopedEdits.value = null; return; }
+  if (!uid || !canon) { scopedEdits.value = null; scopedEditDays.value = null; return; }
   const tags = scopeDataset.value ? datasetTagVariants(scopeDataset.value) : [canon];
   try {
     const { supabase } = await import('../supabase');
@@ -866,9 +910,11 @@ async function loadScopedEdits() {
     const weekAgo = Date.now() - 7 * 86400000;
     const blank = (): EditWindow => ({ edits: 0, merges: 0, splits: 0 });
     const out = { today: blank(), week: blank(), all: blank() };
+    const stamps: number[] = [];
     for (const r of rows) {
       if (r.success === false) continue;  // failed edits never counted toward users.total_edits
       const t = new Date(r.timestamp).getTime();
+      stamps.push(t);
       const wins = [out.all];
       if (t >= weekAgo) wins.push(out.week);
       if (t >= startOfToday.getTime()) wins.push(out.today);
@@ -878,17 +924,68 @@ async function loadScopedEdits() {
       }
     }
     scopedEdits.value = out;
+    scopedEditDays.value = denseDays(stamps);
   } catch (e) {
     if (req !== scopedEditsReq) return;
     console.warn('[profile] per-dataset edits failed, showing all datasets:', e);
     scopedEdits.value = null;
+    scopedEditDays.value = null;
     scopedEditsFailed.value = true;
   }
 }
+/** Cells completed on this dataset, in the game, in the same windows as the
+ *  edits above, with one row per day for the curve. The list is the view the
+ *  leaderboard and the career counter are built on, so the three numbers
+ *  here can not disagree with them. */
+async function loadScopedCompletions() {
+  refreshActiveDatasetCanon();
+  const uid = viewingOtherUser.value ? props.viewUserId : backendStore.userId;
+  const canon = activeDatasetCanon.value;
+  const req = ++scopedCellsReq;
+  scopedCellsFailed.value = false;
+  if (!uid || !canon) { scopedCells.value = null; scopedCellDays.value = null; return; }
+  const keys = new Set((scopeDataset.value ? datasetTagVariants(scopeDataset.value) : [canon]).map(datasetKey));
+  try {
+    const { supabase } = await import('../supabase');
+    const rows: Array<{ dataset: string; cell: string; done_at: string }> = [];
+    const PAGE = 1000;  // PostgREST's default row cap per request
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase.from('ew_cell_completions').select('dataset,cell,done_at')
+        .eq('user_id', uid).order('cell', { ascending: true }).range(from, from + PAGE - 1);
+      if (error) throw error;
+      rows.push(...(data ?? []));
+      if (!data || data.length < PAGE) break;
+    }
+    if (req !== scopedCellsReq) return;  // a newer load superseded this one
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+    const weekAgo = Date.now() - 7 * 86400000;
+    const out = { today: 0, week: 0, all: 0 };
+    const stamps: number[] = [];
+    for (const r of rows) {
+      if (!keys.has(datasetKey(r.dataset))) continue;
+      const t = new Date(r.done_at).getTime();
+      if (!Number.isFinite(t)) continue;
+      stamps.push(t);
+      out.all++;
+      if (t >= weekAgo) out.week++;
+      if (t >= startOfToday.getTime()) out.today++;
+    }
+    scopedCells.value = out;
+    scopedCellDays.value = denseDays(stamps);
+  } catch (e) {
+    if (req !== scopedCellsReq) return;
+    console.warn('[profile] per-dataset completions failed:', e);
+    scopedCells.value = null;
+    scopedCellDays.value = null;
+    scopedCellsFailed.value = true;
+  }
+}
+
 loadScopedEdits();
-watch(() => backendStore.userId, () => loadScopedEdits());
+loadScopedCompletions();
+watch(() => backendStore.userId, () => { loadScopedEdits(); loadScopedCompletions(); });
 // Re-scope when coming back to Overview (the Datasets tab can switch datasets).
-watch(activeTab, tab => { if (tab === 'overview') loadScopedEdits(); });
+watch(activeTab, tab => { if (tab === 'overview') { loadScopedEdits(); loadScopedCompletions(); } });
 
 /** Edits section numbers: this dataset's, or career-wide if edit_log failed. */
 const overviewEdits = computed(() => {
@@ -929,7 +1026,6 @@ const filteredCellHistory = computed(() => {
   return cellHistory.value.filter(c => !!c.dataset && inScope(c.dataset));
 });
 
-const completedCells = computed(() => filteredCellHistory.value.filter(c => c.isComplete));
 const identifiedCells = computed(() => filteredCellHistory.value.filter(c => c.cellType && !c.isComplete));
 
 // ── 14-day activity chart data ───────────────────────────────────────────────
@@ -1159,12 +1255,13 @@ const emit = defineEmits({hide: null, 'open-settings': null});
           </div>
 
           <!-- Edits stats -->
-          <div class="nge-profile-section nge-profile-section--edits">
+          <div class="nge-profile-section nge-profile-section--edits nge-profile-section--windows">
             <!-- Ames 2026-10-05: these count edits made in the game only.
                  A player with months of earlier work elsewhere read a small
                  number here as their work having gone missing. -->
             <div class="nge-profile-section-label"
-                 title="Splits and merges you made in EyeWire II on this dataset. Edits made in other tools, or before you joined EyeWire II, are not counted.">▌ Edits in EyeWire II</div>
+                 title="Splits and merges you made in Pyr on this dataset. Edits made in other tools, or before you joined, are not counted.">▌ Edits in Pyr</div>
+            <div class="nge-profile-windows">
             <div class="nge-profile-stat-row">
               <div class="nge-profile-stat-col" v-for="(col, i) in [
                 {label:'Today',    val:overviewEdits.today.edits, merges:overviewEdits.today.merges, splits:overviewEdits.today.splits},
@@ -1197,6 +1294,34 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                   </span>
                 </div>
               </div>
+            </div>
+            <!-- The same rows as the three numbers, as a line from the first
+                 day to today (Ames 2026-10-11). Nothing while they load, and
+                 nothing for the career fallback, which has no days. -->
+            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="74 158 255" unit="edits" />
+            </div>
+          </div>
+
+          <!-- Cells completed on this dataset, in the game, by the completed
+               cell rule: the same three windows as edits, from the completions
+               list with each cell's completion moment, and the same curve
+               under them (Ames 2026-10-11). Shown on every profile. -->
+          <div class="nge-profile-section nge-profile-section--completions nge-profile-section--windows">
+            <div class="nge-profile-section-label"
+                 title="Cells proofread all the way to completion in Pyr on this dataset. A cell completed again after an edit counts once. Cells marked in other tools are not counted.">▌ Cells completed</div>
+            <div v-if="scopedCellsFailed" class="nge-profile-stat-unavailable">Not available right now</div>
+            <div v-else class="nge-profile-windows">
+              <div class="nge-profile-stat-row">
+                <div class="nge-profile-stat-col" v-for="(col, i) in [
+                  {label:'Today',    val:overviewCells.today},
+                  {label:'Past 7d',  val:overviewCells.week},
+                  {label:'All Time', val:overviewCells.all},
+                ]" :key="i">
+                  <div class="nge-profile-stat-label">{{ col.label }}</div>
+                  <div class="nge-profile-stat-val"><RollUp :value="col.val" /></div>
+                </div>
+              </div>
+              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="95 227 245" unit="cells" />
             </div>
           </div>
 
@@ -1260,12 +1385,6 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             <!-- Sub-label row removed (Amy): tooltips carry the definitions,
                  and each stat sits in its own highlighted tile. -->
             <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
-              <div class="nge-profile-stat-col nge-profile-stat-tile" title="Cells you proofread all the way to completion">
-                <div class="nge-profile-stat-label">Completed</div>
-                <div class="nge-profile-stat-val nge-profile-stat-val--hero">
-                  <RollUp :value="completedCells.length" />
-                </div>
-              </div>
               <div class="nge-profile-stat-col nge-profile-stat-tile" title="Cells you identified (typed) without proofreading edits">
                 <div class="nge-profile-stat-label">Identified</div>
                 <div class="nge-profile-stat-val"><RollUp :value="identifiedCells.length" /></div>
@@ -1405,7 +1524,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               <div
                 v-if="showExplorationViewAll && !showAllExploration"
                 class="nge-profile-badge nge-profile-badge--viewall"
-                title="View all badges in Trophy Case"
+                title="View all Achievements in the Trophy Case"
                 @click="activeTab = 'trophyCase'"
               >
                 <div class="nge-profile-badge-img">
@@ -1415,7 +1534,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               </div>
             </div>
             <div v-if="earnedExplorationBadges.earned.length === 0" class="nge-profile-badges-empty">
-              Complete your first cell to earn a badge!
+              Complete your first cell to earn an Achievement!
             </div>
           </div>
 
@@ -1428,7 +1547,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                  2026-10-07); the left column is the breakdown. -->
             <div class="nge-profile-track-head">
               <div class="nge-profile-section-label" style="color: #ffd08a;">▌ Editor Achievements</div>
-              <div class="nge-profile-track-total" style="--track: #ffd08a;" title="Every merge and cut made in EyeWire II, on every dataset">
+              <div class="nge-profile-track-total" style="--track: #ffd08a;" title="Every merge and cut made in Pyr, on every dataset">
                 <b><RollUp :value="profileStats.editsAllTime ?? 0" /></b> {{ (profileStats.editsAllTime ?? 0) === 1 ? 'edit' : 'edits' }}
               </div>
             </div>
@@ -1473,7 +1592,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               <div
                 v-if="showBuildingViewAll && !showAllBuilding"
                 class="nge-profile-badge nge-profile-badge--viewall"
-                title="View all badges in Trophy Case"
+                title="View all Achievements in the Trophy Case"
                 @click="activeTab = 'trophyCase'"
               >
                 <div class="nge-profile-badge-img">
@@ -1483,7 +1602,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               </div>
             </div>
             <div v-if="earnedBuildingBadges.earned.length === 0" class="nge-profile-badges-empty">
-              Make your first edit to earn a badge!
+              Make your first edit to earn an Achievement!
             </div>
           </div>
 
@@ -1603,7 +1722,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             <!-- Default view: favorite badge → favorite special badge → latest earned -->
             <div v-else-if="!selectedBadge" key="latest" class="nge-profile-viz-panel nge-profile-viz-badge">
               <template v-if="favoriteBadge">
-                <div class="nge-profile-viz-title">⭐ Favorite Badge</div>
+                <div class="nge-profile-viz-title">⭐ Favorite Achievement</div>
                 <img
                   :src="getBadgeUrl(favoriteBadge.imageKey)"
                   :alt="favoriteBadge.name"
@@ -1617,7 +1736,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 </div>
               </template>
               <template v-else-if="favoriteSpecialBadge">
-                <div class="nge-profile-viz-title">⭐ Favorite Badge</div>
+                <div class="nge-profile-viz-title">⭐ Favorite Achievement</div>
                 <img
                   :src="favoriteSpecialBadge.badge?.image_url || favoriteSpecialBadge.badge?.thumbnail_url"
                   :alt="favoriteSpecialBadge.badge?.name"
@@ -1630,7 +1749,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 </div>
               </template>
               <template v-else-if="latestEarnedBadge">
-                <div class="nge-profile-viz-title">▌ Latest Badge</div>
+                <div class="nge-profile-viz-title">▌ Latest Achievement</div>
                 <img
                   :src="getBadgeUrl(latestEarnedBadge.imageKey)"
                   :alt="latestEarnedBadge.name"
@@ -1644,9 +1763,9 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 </div>
               </template>
               <template v-else>
-                <div class="nge-profile-viz-title">▌ Badges</div>
+                <div class="nge-profile-viz-title">▌ Achievements</div>
                 <div class="nge-profile-viz-badge-desc" style="margin-top: 40px;">
-                  Make edits and complete cells to earn badges!
+                  Make edits and complete cells to earn Achievements!
                 </div>
               </template>
             </div>
@@ -3058,7 +3177,9 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 }
 
 .nge-profile-chart-bar--completion {
-  background: linear-gradient(to top, rgba(255, 180, 50, 0.5), rgba(255, 180, 50, 0.85));
+  /* teal like the Cell Completions track and the cells pill, one colour for
+     one quantity (was amber, the trophies' colour) */
+  background: linear-gradient(to top, rgba(95, 227, 245, 0.45), rgba(95, 227, 245, 0.85));
   border-radius: 2px;
 }
 
@@ -3095,7 +3216,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 }
 
 .nge-profile-chart-legend-dot--completion {
-  background: rgba(255, 180, 50, 0.7);
+  background: rgba(95, 227, 245, 0.7);
 }
 
 /* ── Badges ── */
@@ -4335,4 +4456,65 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 /* The featured art is a tap target on phones. */
 body.nge-mobile .nge-trophy-featured-icon { cursor: pointer; }
 
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   FULL SCREEN (Ames 2026-10-11): the profile fills the window on desktop, as
+   it already did on phones (mobile.css). The three Overview columns keep
+   their 460 : 460 : 360 proportions and grow with the window; the narrower
+   tabs (Datasets, Settings, Admin Hub, Blog) keep their widths, centred.
+   Bodies that capped themselves at 90vh minus a guess are bounded by the
+   shell instead. Test page: experimental-UI/components/profile.html.
+───────────────────────────────────────────────────────────────────────────── */
+.nge-profile-modal :deep(.nge-overlay.modal.overlay-content) {
+  width: 100vw;
+  height: 100vh;
+  /* ng-override caps every modal at 100vw - 24px, with !important */
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  border-radius: 0;
+  box-sizing: border-box;
+}
+.nge-profile-modal .nge-profile-shell,
+.nge-profile-modal .nge-profile-shell--trophy,
+.nge-profile-modal .nge-profile-shell--admin,
+.nge-profile-modal .nge-profile-shell--week,
+.nge-profile-modal .nge-profile-shell--dstats,
+.nge-profile-modal .nge-profile-shell--datasets,
+.nge-profile-modal .nge-profile-shell--settings {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: 100vh;
+}
+.nge-profile-modal .nge-profile-col--left   { flex: 46 1 0px; }
+.nge-profile-modal .nge-profile-col--center { flex: 46 1 0px; }
+.nge-profile-modal .nge-profile-col--right  { flex: 36 1 0px; }
+/* the tabs that were narrower boxes keep their widths, centred in the frame */
+.nge-profile-modal .nge-profile-body--datasets,
+.nge-profile-modal .nge-profile-body.nge-ds-more { width: 100%; max-width: 640px; align-self: center; }
+/* sized to its list, not to the whole frame, so More datasets follows it
+   instead of sitting at the foot of the screen */
+.nge-profile-modal .nge-profile-body--datasets { flex: 0 1 auto; }
+.nge-profile-modal .nge-profile-body--settings { width: 100%; max-width: 1120px; align-self: center; }
+.nge-profile-modal .nge-profile-body--admin { width: 100%; max-width: 720px; align-self: center; max-height: none; }
+.nge-profile-modal .nge-profile-body--week { width: 100%; max-width: 1180px; align-self: center; max-height: none; }
+.nge-profile-modal .nge-profile-body--dstats { width: 100%; max-width: 1180px; align-self: center; max-height: none; }
+.nge-profile-modal .nge-profile-body--trophy { width: 100%; max-width: 1200px; align-self: center; }
+.nge-profile-modal .nge-trophy-scroll { max-height: none; }
+
+/* ── Edits and Cells completed: three windows each, and the curve ──────────
+   In a wide column (full screen on a big monitor) the numbers sit beside
+   the curve; in a narrow one the curve drops under them. */
+.nge-profile-section--windows { container-type: inline-size; }
+.nge-profile-section--completions { animation: ngeSectionRollIn 0.2s ease-out 0.24s both; }
+.nge-profile-windows { display: grid; gap: 10px 18px; min-width: 0; }
+@container (min-width: 560px) {
+  .nge-profile-windows {
+    grid-template-columns: minmax(230px, 5fr) minmax(0, 6fr);
+    align-items: end;
+  }
+  .nge-profile-windows :deep(.nge-effort) { margin-top: 0; }
+}
+/* A number that can not be read says so; it is never shown as zero. */
+.nge-profile-stat-unavailable { font-size: 0.82em; color: rgba(200, 215, 240, 0.55); }
 </style>

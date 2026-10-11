@@ -2,6 +2,16 @@
   "about": "What changed in Pyr, for players. Newest first. Every deploy that changes something a player can see or do adds an entry at the top: 'at' is when it went live (UTC), the title names it, and each item is one plain sentence a player would understand, with no code words. The game shows these in the 'New version ready' notice. See CHANGELOG-RULE in README.md.",
   "entries": [
     {
+      "at": "2026-10-11T15:16:00Z",
+      "title": "The profile fills the window",
+      "items": [
+        "Your profile now fills the whole window, with more room for everything in it.",
+        "Cells completed now shows today, the past 7 days and all time for the dataset you are on, the same three windows as edits.",
+        "Under both, a small curve draws your running total from your first day to today, with the past 7 days and today marked on it. Point at it to read any day.",
+        "Completions on the Last 14 Days chart are now teal, matching the Cell Completions track."
+      ]
+    },
+    {
       "at": "2026-10-11T14:36:00Z",
       "title": "A new look for the Merger Sandbox count",
       "items": [
