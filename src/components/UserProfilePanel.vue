@@ -546,6 +546,9 @@ const earnedLoyaltyBadges = computed(() => {
 /** Most recently earned badge (highest threshold among earned). Loyalty is
  *  left out: its thresholds are days, not edits or cells, so they do not
  *  compare. */
+/** The latest Days Achievement: the loyalty track's newest earned one. */
+const latestLoyaltyBadge = computed<BadgeDefinition | null>(() => earnedLoyaltyBadges.value.earned[0] ?? null);
+
 const latestEarnedBadge = computed(() => {
   const allEarned = BADGE_DEFINITIONS.filter(b => b.track !== 'loyalty' && isBadgeEarned(b));
   if (allEarned.length === 0) return null;
@@ -1039,7 +1042,8 @@ const filteredCellHistory = computed(() => {
  *  Cells completed numbers (Ames 2026-10-11: "what happened to the list of my
  *  recently completed cells?"). Server rows carry no type, name or favorite. */
 const recentCells = computed<Array<CellHistoryEntry & { serverOnly?: boolean }>>(() => {
-  if (filteredCellHistory.value.length) return filteredCellHistory.value;
+  const done = filteredCellHistory.value.filter(c => c.isComplete);
+  if (done.length) return done;
   return (scopedCompletionRows.value ?? []).map(r => ({
     segId: r.cell, isComplete: true, cellType: '', position: [0, 0, 0] as [number, number, number],
     updatedAt: r.done_at, dataset: activeDatasetCanon.value, serverOnly: true,
@@ -1247,16 +1251,15 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 <img v-else-if="flagImgUrl(profileFlag)" :src="flagImgUrl(profileFlag)" class="nge-flag-img" style="width:28px;height:20px;" />
               </div>
 
-              <div class="nge-profile-name">{{ profileName }}</div>
+              <!-- The username, when there is one: it is the name players know
+                   you by in chat (Ames 2026-10-11). The display name is the tooltip. -->
+              <div class="nge-profile-name" :title="profileUsername ? profileName : undefined">{{ profileUsername || profileName }}</div>
 
               <button v-if="!viewingOtherUser" class="nge-profile-edit-btn"
                       @click="activeTab = 'settings'"
                       title="Edit Profile — set bio, flag, and more">⚙</button>
             </div>
 
-            <!-- The handle people actually use to tag you in chat, so it
-                 belongs on the profile next to the name. -->
-            <div v-if="profileUsername" class="nge-profile-username">@{{ profileUsername }}</div>
 
             <!-- Email is deliberately NOT shown. It was rendered for whoever's
                  profile was open, which exposed other users' addresses to
@@ -1281,6 +1284,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                  title="Cells proofread all the way to completion in Pyr on this dataset. A cell completed again after an edit counts once. Cells marked in other tools are not counted.">▌ Cells completed</div>
             <div v-if="scopedCellsFailed" class="nge-profile-stat-unavailable">Not available right now</div>
             <div v-else class="nge-profile-windows">
+              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="95 227 245" unit="cells" />
               <div class="nge-profile-stat-row">
                 <div class="nge-profile-stat-col" v-for="(col, i) in [
                   {label:'Today',    val:overviewCells.today},
@@ -1291,7 +1295,6 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                   <div class="nge-profile-stat-val"><RollUp :value="col.val" /></div>
                 </div>
               </div>
-              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="95 227 245" unit="cells" />
             </div>
           </div>
 
@@ -1303,6 +1306,10 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             <div class="nge-profile-section-label"
                  title="Splits and merges you made in Pyr on this dataset. Edits made in other tools, or before you joined, are not counted.">▌ Edits in Pyr</div>
             <div class="nge-profile-windows">
+            <!-- The same rows as the three numbers, as a line from the first
+                 day to today (Ames 2026-10-11). Nothing while they load, and
+                 nothing for the career fallback, which has no days. -->
+            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="74 158 255" unit="edits" />
             <div class="nge-profile-stat-row">
               <div class="nge-profile-stat-col" v-for="(col, i) in [
                 {label:'Today',    val:overviewEdits.today.edits, merges:overviewEdits.today.merges, splits:overviewEdits.today.splits},
@@ -1336,23 +1343,6 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 </div>
               </div>
             </div>
-            <!-- The same rows as the three numbers, as a line from the first
-                 day to today (Ames 2026-10-11). Nothing while they load, and
-                 nothing for the career fallback, which has no days. -->
-            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="74 158 255" unit="edits" />
-            </div>
-          </div>
-
-          <!-- Annotations. The old Cells block here said Cells twice with the
-               block above (Ames 2026-10-11); the number left in it is the
-               annotations, on every dataset. -->
-          <div class="nge-profile-section nge-profile-section--annotations">
-            <div class="nge-profile-section-label">▌ Annotations</div>
-            <div class="nge-profile-stat-row">
-              <div class="nge-profile-stat-col" :title="viewingOtherUser ? 'Points, lines and boxes this player has placed in annotation layers, on every dataset' : 'Points, lines and boxes you placed in annotation layers, on every dataset'">
-                <div class="nge-profile-stat-label">All Time</div>
-                <div class="nge-profile-stat-val" style="color: #c9a0ff; text-shadow: 0 0 14px rgba(201, 160, 255, 0.35);"><RollUp :value="annotationsPlaced" /></div>
-              </div>
             </div>
           </div>
 
@@ -1361,23 +1351,20 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                boxes (Ames 2026-10-11). -->
           <div v-if="totalDays > 0" class="nge-profile-section nge-profile-section--days">
             <div class="nge-profile-section-label">▌ Days as a citizen scientist</div>
-            <div class="nge-profile-stat-row">
+            <div class="nge-profile-days-row">
+              <!-- The latest Days Achievement, at the left. Streak and best
+                   streak are not repeated here: they sit on the right under
+                   Streak (Ames 2026-10-11). -->
+              <div v-if="latestLoyaltyBadge" class="nge-profile-feature" :title="badgeTooltip(latestLoyaltyBadge)" @click="onBadgeClick(latestLoyaltyBadge)">
+                <img :src="getBadgeUrl(latestLoyaltyBadge.imageKey)" :alt="latestLoyaltyBadge.name" class="nge-profile-feature-icon" :class="`nge-badge--${latestLoyaltyBadge.slug}`" />
+                <div class="nge-profile-feature-name">{{ latestLoyaltyBadge.name }}</div>
+              </div>
               <div class="nge-profile-stat-col" title="Every day you have shown up, ever. This never resets.">
                 <div class="nge-profile-stat-label">Total days</div>
-                <div class="nge-profile-stat-val"><RollUp :value="totalDays" /></div>
+                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="totalDays" /></div>
+                <!-- no pills and no bar (Ames 2026-10-06: "unnecessary", "too much"): the count says it -->
+                <div class="nge-days-next" :title="`Next milestone: day ${nextDay}`">{{ (nextDay - totalDays).toLocaleString() }} {{ nextDay - totalDays === 1 ? 'day' : 'days' }} to day {{ nextDay.toLocaleString() }}</div>
               </div>
-              <div class="nge-profile-stat-col" title="Days in a row right now, on your own calendar">
-                <div class="nge-profile-stat-label">Streak</div>
-                <div class="nge-profile-stat-val"><RollUp :value="dayStreak" /></div>
-              </div>
-              <div class="nge-profile-stat-col" title="The longest run of days in a row">
-                <div class="nge-profile-stat-label">Best streak</div>
-                <div class="nge-profile-stat-val"><RollUp :value="bestDayStreak" /></div>
-              </div>
-            </div>
-            <div class="nge-days-ladder" :title="`Next milestone: day ${nextDay}`">
-              <!-- no pills and no bar (Ames 2026-10-06: "unnecessary", "too much"): the count says it -->
-              <div class="nge-days-next">{{ (nextDay - totalDays).toLocaleString() }} {{ nextDay - totalDays === 1 ? 'day' : 'days' }} to day {{ nextDay.toLocaleString() }}</div>
             </div>
           </div>
 
@@ -1401,7 +1388,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                the browser's own history of cells worked on here; when that is
                empty it is the cells completed on this dataset from the server's
                list (recentCells). -->
-          <div v-if="!viewingOtherUser || recentCells.length" class="nge-profile-section nge-profile-section--cells">
+          <div class="nge-profile-section nge-profile-section--cells">
             <template v-if="!viewingOtherUser">
             <!-- Scout Report: tags placed and fixed -->
             <div class="nge-profile-section-label">▌ Scout Report</div>
@@ -1422,14 +1409,28 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 <div class="nge-profile-stat-label">Assists</div>
                 <div class="nge-profile-stat-val" style="color: #7f8;"><RollUp :value="playerAssists" /></div>
               </div>
+              <!-- Annotations placed, on every dataset: a column here rather than
+                   a row of its own (Ames 2026-10-11). -->
+              <div class="nge-profile-stat-col" title="Points, lines and boxes you placed in annotation layers, on every dataset">
+                <div class="nge-profile-stat-label">Annotations</div>
+                <div class="nge-profile-stat-val" style="color: #c9a0ff; text-shadow: 0 0 14px rgba(201, 160, 255, 0.35);"><RollUp :value="annotationsPlaced" /></div>
+              </div>
             </div>
-
+            </template>
+            <template v-else>
+            <div class="nge-profile-section-label">▌ Annotations</div>
+            <div class="nge-profile-stat-row" style="margin-bottom: 12px;">
+              <div class="nge-profile-stat-col" title="Points, lines and boxes this player has placed in annotation layers, on every dataset">
+                <div class="nge-profile-stat-label">All Time</div>
+                <div class="nge-profile-stat-val" style="color: #c9a0ff; text-shadow: 0 0 14px rgba(201, 160, 255, 0.35);"><RollUp :value="annotationsPlaced" /></div>
+              </div>
+            </div>
             </template>
 
             <!-- Cell history list -->
             <div class="nge-cell-list" v-if="recentCells.length > 0">
               <div class="nge-cell-list-header">
-                <span class="nge-cell-list-title">Recent Cells</span>
+                <span class="nge-cell-list-title">{{ viewingOtherUser ? 'Recently completed cells' : 'My recently completed cells' }}</span>
                 <span v-if="activeDatasetCanon" class="nge-cell-list-dataset" :title="'Filtered to ' + scopeLabel">{{ scopeDataset?.shortLabel || activeDatasetCanon }}</span>
                 <button class="nge-cell-list-all" @click="activeTab = 'myCells'" title="Every cell, by dataset">{{ viewingOtherUser ? 'All cells' : 'My cells' }} →</button>
               </div>
@@ -1467,8 +1468,8 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 </div>
               </div>
             </div>
-            <div class="nge-cell-empty" v-else-if="!viewingOtherUser">
-              <template v-if="activeDatasetCanon">No cells on {{ scopeDataset?.shortLabel || activeDatasetCanon }} yet. </template>Select segments and mark complete or set cell type to build your history.
+            <div class="nge-cell-empty" v-else>
+              <template v-if="activeDatasetCanon">No cells completed on {{ scopeDataset?.shortLabel || activeDatasetCanon }} yet. </template><template v-if="!viewingOtherUser">Your recently completed cells will show here.</template>
             </div>
           </div>
 
@@ -4517,20 +4518,26 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
 .nge-profile-modal .nge-profile-body--trophy { width: 100%; max-width: 1200px; align-self: center; }
 .nge-profile-modal .nge-trophy-scroll { max-height: none; }
 
-/* ── Edits and Cells completed: three windows each, and the curve ──────────
-   In a wide column (full screen on a big monitor) the numbers sit beside
-   the curve; in a narrow one the curve drops under them. */
-.nge-profile-section--windows { container-type: inline-size; }
+/* ── Cells completed and Edits: the curve, then the three windows ──────────
+   The curve sits under the label and the numbers under it, whatever the
+   column's width (Ames 2026-10-11: "put the animated chart above the
+   stats"). */
 .nge-profile-section--completions { animation: ngeSectionRollIn 0.2s ease-out 0.16s both; }
-.nge-profile-section--annotations { animation: ngeSectionRollIn 0.2s ease-out 0.22s both; }
-.nge-profile-windows { display: grid; gap: 10px 18px; min-width: 0; }
-@container (min-width: 560px) {
-  .nge-profile-windows {
-    grid-template-columns: minmax(230px, 5fr) minmax(0, 6fr);
-    align-items: end;
-  }
-  .nge-profile-windows :deep(.nge-effort) { margin-top: 0; }
+.nge-profile-windows { display: grid; gap: 10px; min-width: 0; }
+.nge-profile-windows :deep(.nge-effort) { margin-top: 2px; }
+
+/* ── Days: the latest Days Achievement beside the total ─────────────────── */
+.nge-profile-days-row { display: flex; align-items: center; gap: 20px; }
+.nge-profile-days-row > .nge-profile-stat-col { flex: 1 1 0; min-width: 0; }
+.nge-profile-feature {
+  flex: none; width: 92px;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  cursor: pointer; border-radius: 8px; padding: 4px 2px;
+  transition: background 0.15s, transform 0.15s;
 }
+.nge-profile-feature:hover { background: rgba(74, 158, 255, 0.06); transform: translateY(-1px); }
+.nge-profile-feature-icon { width: 64px; height: 64px; object-fit: contain; filter: drop-shadow(0 0 10px rgba(201, 168, 255, 0.35)); }
+.nge-profile-feature-name { font-size: 0.72em; color: #cfd8e8; margin-top: 4px; line-height: 1.2; }
 /* A number that can not be read says so; it is never shown as zero. */
 .nge-profile-stat-unavailable { font-size: 0.82em; color: rgba(200, 215, 240, 0.55); }
 </style>
