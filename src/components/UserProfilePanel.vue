@@ -852,6 +852,8 @@ const scopedEditDays = ref<EffortDay[] | null>(null);
 // log: cells marked in other tools never count (Ames 2026-10-07).
 const scopedCells = ref<{ today: number; week: number; all: number } | null>(null);
 const scopedCellDays = ref<EffortDay[] | null>(null);
+/** The matched completion rows, newest first, for the recent cells list. */
+const scopedCompletionRows = ref<Array<{ cell: string; done_at: string }> | null>(null);
 const scopedCellsFailed = ref(false);
 let scopedCellsReq = 0;
 /** Zeros while loading, never another dataset's numbers. */
@@ -943,7 +945,7 @@ async function loadScopedCompletions() {
   const canon = activeDatasetCanon.value;
   const req = ++scopedCellsReq;
   scopedCellsFailed.value = false;
-  if (!uid || !canon) { scopedCells.value = null; scopedCellDays.value = null; return; }
+  if (!uid || !canon) { scopedCells.value = null; scopedCellDays.value = null; scopedCompletionRows.value = null; return; }
   const keys = new Set((scopeDataset.value ? datasetTagVariants(scopeDataset.value) : [canon]).map(datasetKey));
   try {
     const { supabase } = await import('../supabase');
@@ -961,22 +963,26 @@ async function loadScopedCompletions() {
     const weekAgo = Date.now() - 7 * 86400000;
     const out = { today: 0, week: 0, all: 0 };
     const stamps: number[] = [];
+    const kept: Array<{ cell: string; done_at: string; t: number }> = [];
     for (const r of rows) {
       if (!keys.has(datasetKey(r.dataset))) continue;
       const t = new Date(r.done_at).getTime();
       if (!Number.isFinite(t)) continue;
       stamps.push(t);
+      kept.push({ cell: String(r.cell), done_at: r.done_at, t });
       out.all++;
       if (t >= weekAgo) out.week++;
       if (t >= startOfToday.getTime()) out.today++;
     }
     scopedCells.value = out;
     scopedCellDays.value = denseDays(stamps);
+    scopedCompletionRows.value = kept.sort((a, b) => b.t - a.t).map(r => ({ cell: r.cell, done_at: r.done_at }));
   } catch (e) {
     if (req !== scopedCellsReq) return;
     console.warn('[profile] per-dataset completions failed:', e);
     scopedCells.value = null;
     scopedCellDays.value = null;
+    scopedCompletionRows.value = null;
     scopedCellsFailed.value = true;
   }
 }
@@ -1026,7 +1032,19 @@ const filteredCellHistory = computed(() => {
   return cellHistory.value.filter(c => !!c.dataset && inScope(c.dataset));
 });
 
-const identifiedCells = computed(() => filteredCellHistory.value.filter(c => c.cellType && !c.isComplete));
+
+/** Recent cells: the browser's own history of cells worked on here, or, when
+ *  that is empty (a new device, a build on another address), the cells
+ *  completed on this dataset from the server's list, the same rows as the
+ *  Cells completed numbers (Ames 2026-10-11: "what happened to the list of my
+ *  recently completed cells?"). Server rows carry no type, name or favorite. */
+const recentCells = computed<Array<CellHistoryEntry & { serverOnly?: boolean }>>(() => {
+  if (filteredCellHistory.value.length) return filteredCellHistory.value;
+  return (scopedCompletionRows.value ?? []).map(r => ({
+    segId: r.cell, isComplete: true, cellType: '', position: [0, 0, 0] as [number, number, number],
+    updatedAt: r.done_at, dataset: activeDatasetCanon.value, serverOnly: true,
+  }));
+});
 
 // ── 14-day activity chart data ───────────────────────────────────────────────
 const last14Days = computed(() => {
@@ -1254,6 +1272,29 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             </template>
           </div>
 
+          <!-- Cells completed on this dataset, in the game, by the completed
+               cell rule: the same three windows as edits, from the completions
+               list with each cell's completion moment, and the same curve
+               under them (Ames 2026-10-11). Shown on every profile. -->
+          <div class="nge-profile-section nge-profile-section--completions nge-profile-section--windows">
+            <div class="nge-profile-section-label"
+                 title="Cells proofread all the way to completion in Pyr on this dataset. A cell completed again after an edit counts once. Cells marked in other tools are not counted.">▌ Cells completed</div>
+            <div v-if="scopedCellsFailed" class="nge-profile-stat-unavailable">Not available right now</div>
+            <div v-else class="nge-profile-windows">
+              <div class="nge-profile-stat-row">
+                <div class="nge-profile-stat-col" v-for="(col, i) in [
+                  {label:'Today',    val:overviewCells.today},
+                  {label:'Past 7d',  val:overviewCells.week},
+                  {label:'All Time', val:overviewCells.all},
+                ]" :key="i">
+                  <div class="nge-profile-stat-label">{{ col.label }}</div>
+                  <div class="nge-profile-stat-val"><RollUp :value="col.val" /></div>
+                </div>
+              </div>
+              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="95 227 245" unit="cells" />
+            </div>
+          </div>
+
           <!-- Edits stats -->
           <div class="nge-profile-section nge-profile-section--edits nge-profile-section--windows">
             <!-- Ames 2026-10-05: these count edits made in the game only.
@@ -1302,26 +1343,41 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             </div>
           </div>
 
-          <!-- Cells completed on this dataset, in the game, by the completed
-               cell rule: the same three windows as edits, from the completions
-               list with each cell's completion moment, and the same curve
-               under them (Ames 2026-10-11). Shown on every profile. -->
-          <div class="nge-profile-section nge-profile-section--completions nge-profile-section--windows">
-            <div class="nge-profile-section-label"
-                 title="Cells proofread all the way to completion in Pyr on this dataset. A cell completed again after an edit counts once. Cells marked in other tools are not counted.">▌ Cells completed</div>
-            <div v-if="scopedCellsFailed" class="nge-profile-stat-unavailable">Not available right now</div>
-            <div v-else class="nge-profile-windows">
-              <div class="nge-profile-stat-row">
-                <div class="nge-profile-stat-col" v-for="(col, i) in [
-                  {label:'Today',    val:overviewCells.today},
-                  {label:'Past 7d',  val:overviewCells.week},
-                  {label:'All Time', val:overviewCells.all},
-                ]" :key="i">
-                  <div class="nge-profile-stat-label">{{ col.label }}</div>
-                  <div class="nge-profile-stat-val"><RollUp :value="col.val" /></div>
-                </div>
+          <!-- Annotations. The old Cells block here said Cells twice with the
+               block above (Ames 2026-10-11); the number left in it is the
+               annotations, on every dataset. -->
+          <div class="nge-profile-section nge-profile-section--annotations">
+            <div class="nge-profile-section-label">▌ Annotations</div>
+            <div class="nge-profile-stat-row">
+              <div class="nge-profile-stat-col" :title="viewingOtherUser ? 'Points, lines and boxes this player has placed in annotation layers, on every dataset' : 'Points, lines and boxes you placed in annotation layers, on every dataset'">
+                <div class="nge-profile-stat-label">All Time</div>
+                <div class="nge-profile-stat-val" style="color: #c9a0ff; text-shadow: 0 0 14px rgba(201, 160, 255, 0.35);"><RollUp :value="annotationsPlaced" /></div>
               </div>
-              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="95 227 245" unit="cells" />
+            </div>
+          </div>
+
+          <!-- Days: total days shown up (never resets), the streaks, and the
+               ladder of milestones (Ames 2026-10-06). Three plain columns, no
+               boxes (Ames 2026-10-11). -->
+          <div v-if="totalDays > 0" class="nge-profile-section nge-profile-section--days">
+            <div class="nge-profile-section-label">▌ Days as a citizen scientist</div>
+            <div class="nge-profile-stat-row">
+              <div class="nge-profile-stat-col" title="Every day you have shown up, ever. This never resets.">
+                <div class="nge-profile-stat-label">Total days</div>
+                <div class="nge-profile-stat-val"><RollUp :value="totalDays" /></div>
+              </div>
+              <div class="nge-profile-stat-col" title="Days in a row right now, on your own calendar">
+                <div class="nge-profile-stat-label">Streak</div>
+                <div class="nge-profile-stat-val"><RollUp :value="dayStreak" /></div>
+              </div>
+              <div class="nge-profile-stat-col" title="The longest run of days in a row">
+                <div class="nge-profile-stat-label">Best streak</div>
+                <div class="nge-profile-stat-val"><RollUp :value="bestDayStreak" /></div>
+              </div>
+            </div>
+            <div class="nge-days-ladder" :title="`Next milestone: day ${nextDay}`">
+              <!-- no pills and no bar (Ames 2026-10-06: "unnecessary", "too much"): the count says it -->
+              <div class="nge-days-next">{{ (nextDay - totalDays).toLocaleString() }} {{ nextDay - totalDays === 1 ? 'day' : 'days' }} to day {{ nextDay.toLocaleString() }}</div>
             </div>
           </div>
 
@@ -1341,68 +1397,14 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             </div>
           </div>
 
-          <!-- Days: total days shown up (never resets), the streaks, and the
-               ladder of milestones (Ames 2026-10-06). -->
-          <div v-if="totalDays > 0" class="nge-profile-section nge-profile-section--days">
-            <div class="nge-profile-section-label">▌ Days as a citizen scientist</div>
-            <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
-              <div class="nge-profile-stat-col nge-profile-stat-tile" title="Every day you have shown up, ever. This never resets.">
-                <div class="nge-profile-stat-label">Total days</div>
-                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="totalDays" /></div>
-              </div>
-              <div class="nge-profile-stat-col nge-profile-stat-tile" title="Days in a row right now, on your own calendar">
-                <div class="nge-profile-stat-label">Streak</div>
-                <div class="nge-profile-stat-val"><RollUp :value="dayStreak" /></div>
-              </div>
-              <div class="nge-profile-stat-col nge-profile-stat-tile" title="The longest run of days in a row">
-                <div class="nge-profile-stat-label">Best streak</div>
-                <div class="nge-profile-stat-val"><RollUp :value="bestDayStreak" /></div>
-              </div>
-            </div>
-            <div class="nge-days-ladder" :title="`Next milestone: day ${nextDay}`">
-              <!-- no pills and no bar (Ames 2026-10-06: "unnecessary", "too much"): the count says it -->
-              <div class="nge-days-next">{{ (nextDay - totalDays).toLocaleString() }} {{ nextDay - totalDays === 1 ? 'day' : 'days' }} to day {{ nextDay.toLocaleString() }}</div>
-            </div>
-          </div>
-
-          <!-- Someone else's profile: their annotations. Their cells completed
-               total is in the Cell Completions column (Ames 2026-10-07). Your
-               own profile has the fuller Cells block below, built from your
-               cell history on this dataset. -->
-          <div v-if="viewingOtherUser" class="nge-profile-section nge-profile-section--cells">
-            <div class="nge-profile-section-label">▌ Cells</div>
-            <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
-              <div class="nge-profile-stat-col nge-profile-stat-tile" title="Points, lines and boxes this player has placed in annotation layers, on every dataset">
-                <div class="nge-profile-stat-label">Annotations</div>
-                <div class="nge-profile-stat-val" style="color: #c9a0ff; text-shadow: 0 0 14px rgba(201, 160, 255, 0.35);"><RollUp :value="annotationsPlaced" /></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Cells stats -->
-          <div v-if="!viewingOtherUser" class="nge-profile-section nge-profile-section--cells">
-            <div class="nge-profile-section-label">▌ Cells</div>
-            <!-- Sub-label row removed (Amy): tooltips carry the definitions,
-                 and each stat sits in its own highlighted tile. -->
-            <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
-              <div class="nge-profile-stat-col nge-profile-stat-tile" title="Cells you identified (typed) without proofreading edits">
-                <div class="nge-profile-stat-label">Identified</div>
-                <div class="nge-profile-stat-val"><RollUp :value="identifiedCells.length" /></div>
-              </div>
-              <div class="nge-profile-stat-col nge-profile-stat-tile" title="Every cell you have worked on in any way">
-                <div class="nge-profile-stat-label">Total</div>
-                <div class="nge-profile-stat-val"><RollUp :value="filteredCellHistory.length" /></div>
-              </div>
-              <!-- Annotations sit with the editing numbers (Ames 2026-10-01); the
-                   count can run to many thousands, which this tile has room for. -->
-              <div class="nge-profile-stat-col nge-profile-stat-tile" title="Points, lines and boxes you placed in annotation layers, on every dataset">
-                <div class="nge-profile-stat-label">Annotations</div>
-                <div class="nge-profile-stat-val" style="color: #c9a0ff; text-shadow: 0 0 14px rgba(201, 160, 255, 0.35);"><RollUp :value="annotationsPlaced" /></div>
-              </div>
-            </div>
-
+          <!-- Scout report (your tags) and the recent cells list. The list is
+               the browser's own history of cells worked on here; when that is
+               empty it is the cells completed on this dataset from the server's
+               list (recentCells). -->
+          <div v-if="!viewingOtherUser || recentCells.length" class="nge-profile-section nge-profile-section--cells">
+            <template v-if="!viewingOtherUser">
             <!-- Scout Report: tags placed and fixed -->
-            <div class="nge-profile-section-label" style="margin-top: 12px;">▌ Scout Report</div>
+            <div class="nge-profile-section-label">▌ Scout Report</div>
             <div class="nge-profile-stat-row nge-profile-stat-row--scout" style="margin-bottom: 12px;">
               <div class="nge-profile-stat-col" title="Tags you placed for others to fix">
                 <div class="nge-profile-stat-label">Tags Placed</div>
@@ -1422,8 +1424,10 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               </div>
             </div>
 
+            </template>
+
             <!-- Cell history list -->
-            <div class="nge-cell-list" v-if="filteredCellHistory.length > 0">
+            <div class="nge-cell-list" v-if="recentCells.length > 0">
               <div class="nge-cell-list-header">
                 <span class="nge-cell-list-title">Recent Cells</span>
                 <span v-if="activeDatasetCanon" class="nge-cell-list-dataset" :title="'Filtered to ' + scopeLabel">{{ scopeDataset?.shortLabel || activeDatasetCanon }}</span>
@@ -1436,12 +1440,13 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               </div>
               <div class="nge-cell-list-scroll">
                 <div
-                  v-for="cell in filteredCellHistory.slice(0, 50)"
+                  v-for="cell in recentCells.slice(0, 50)"
                   :key="cell.segId"
                   class="nge-cell-row"
                   :title="cell.nickname ? `${cell.nickname} (${cell.segId})` : `Jump to ${cell.segId}`"
                 >
                   <button
+                    v-if="!cell.serverOnly"
                     class="nge-cell-fav"
                     :class="{ 'nge-cell-fav--active': cell.isFavorite }"
                     @click.stop="historyStore.toggleFavorite(cell.segId)"
@@ -1454,6 +1459,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                   <span class="nge-cell-type" v-if="cell.cellType" @click="handleJumpToCell(cell.segId)">{{ cell.cellType }}</span>
                   <span class="nge-cell-time" @click="handleJumpToCell(cell.segId)">{{ relativeTime(cell.updatedAt) }}</span>
                   <button
+                    v-if="!cell.serverOnly"
                     class="nge-cell-rename"
                     @click.stop="promptNickname(cell.segId)"
                     title="Rename this cell"
@@ -1461,7 +1467,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 </div>
               </div>
             </div>
-            <div class="nge-cell-empty" v-else>
+            <div class="nge-cell-empty" v-else-if="!viewingOtherUser">
               <template v-if="activeDatasetCanon">No cells on {{ scopeDataset?.shortLabel || activeDatasetCanon }} yet. </template>Select segments and mark complete or set cell type to build your history.
             </div>
           </div>
@@ -4487,8 +4493,17 @@ body.nge-mobile .nge-trophy-featured-icon { cursor: pointer; }
   max-height: 100vh;
 }
 .nge-profile-modal .nge-profile-col--left   { flex: 46 1 0px; }
-.nge-profile-modal .nge-profile-col--center { flex: 46 1 0px; }
+/* the middle column keeps its old width: its achievement rows are five
+   tiles, and spread across a wider column they drifted apart (Ames
+   2026-10-11, "the current version looks better"). The left and right
+   columns take the room instead. */
+.nge-profile-modal .nge-profile-col--center { flex: 0 1 460px; }
 .nge-profile-modal .nge-profile-col--right  { flex: 36 1 0px; }
+/* room at the edges on desktop: full screen is not a reason to sit on them
+   (Ames 2026-10-11). Phones keep mobile.css's safe area padding. */
+body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-content) {
+  padding: 22px 40px 26px;
+}
 /* the tabs that were narrower boxes keep their widths, centred in the frame */
 .nge-profile-modal .nge-profile-body--datasets,
 .nge-profile-modal .nge-profile-body.nge-ds-more { width: 100%; max-width: 640px; align-self: center; }
@@ -4506,7 +4521,8 @@ body.nge-mobile .nge-trophy-featured-icon { cursor: pointer; }
    In a wide column (full screen on a big monitor) the numbers sit beside
    the curve; in a narrow one the curve drops under them. */
 .nge-profile-section--windows { container-type: inline-size; }
-.nge-profile-section--completions { animation: ngeSectionRollIn 0.2s ease-out 0.24s both; }
+.nge-profile-section--completions { animation: ngeSectionRollIn 0.2s ease-out 0.16s both; }
+.nge-profile-section--annotations { animation: ngeSectionRollIn 0.2s ease-out 0.22s both; }
 .nge-profile-windows { display: grid; gap: 10px 18px; min-width: 0; }
 @container (min-width: 560px) {
   .nge-profile-windows {
