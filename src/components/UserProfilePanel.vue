@@ -1293,7 +1293,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 <img :src="getBadgeUrl(latestExplorationBadge.imageKey)" :alt="latestExplorationBadge.name" class="nge-profile-feature-icon" :class="`nge-badge--${latestExplorationBadge.slug}`" />
               </div>
             <div class="nge-profile-windows">
-              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="95 227 245" unit="cells" />
+              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="144 255 242" unit="cells" />
               <div class="nge-profile-stat-row">
                 <div class="nge-profile-stat-col" v-for="(col, i) in [
                   {label:'Today',    val:overviewCells.today},
@@ -1324,7 +1324,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             <!-- The same rows as the three numbers, as a line from the first
                  day to today (Ames 2026-10-11). Nothing while they load, and
                  nothing for the career fallback, which has no days. -->
-            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="74 158 255" unit="edits" />
+            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="255 208 138" unit="edits" />
             <div class="nge-profile-stat-row">
               <div class="nge-profile-stat-col" v-for="(col, i) in [
                 {label:'Today',    val:overviewEdits.today.edits, merges:overviewEdits.today.merges, splits:overviewEdits.today.splits},
@@ -1550,7 +1550,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 @click="activeTab = 'trophyCase'"
               >
                 <div class="nge-profile-badge-img">
-                  <div class="nge-profile-badge-viewall-icon">→</div>
+                  <svg class="nge-profile-badge-viewall-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </div>
                 <div class="nge-profile-badge-name">View all</div>
               </div>
@@ -1618,7 +1618,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 @click="activeTab = 'trophyCase'"
               >
                 <div class="nge-profile-badge-img">
-                  <div class="nge-profile-badge-viewall-icon">→</div>
+                  <svg class="nge-profile-badge-viewall-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </div>
                 <div class="nge-profile-badge-name">View all</div>
               </div>
@@ -1673,7 +1673,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 @click="activeTab = 'trophyCase'"
               >
                 <div class="nge-profile-badge-img">
-                  <div class="nge-profile-badge-viewall-icon">→</div>
+                  <svg class="nge-profile-badge-viewall-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </div>
                 <div class="nge-profile-badge-name">View all</div>
               </div>
@@ -1710,7 +1710,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                   @click="showAllSpecialModal = true"
                 >
                   <div class="nge-profile-badge-img">
-                    <div class="nge-profile-badge-viewall-icon">→</div>
+                    <svg class="nge-profile-badge-viewall-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                   </div>
                   <div class="nge-profile-badge-name">View all</div>
                 </div>
@@ -2348,6 +2348,9 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap');
 .nge-profile-modal { font-size: 0.9em; }
+/* a size up on desktop now that the window is the frame (Ames 2026-10-11:
+   "the text is all a bit small"); phones keep mobile.css's sizes */
+body:not(.nge-mobile) .nge-profile-modal { font-size: 1.05em; }
 
 /* ─────────────────────────────────────────────────────────────────────────────
    OPEN ANIMATION — panel materializes fast, then sections stagger in
@@ -3195,13 +3198,14 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 }
 
 .nge-profile-chart-bar--edit {
-  background: linear-gradient(to top, rgba(74, 158, 255, 0.5), rgba(74, 158, 255, 0.8));
+  /* gold, the Editor Achievements colour (Ames 2026-10-11: one colour key) */
+  background: linear-gradient(to top, rgba(255, 208, 138, 0.5), rgba(255, 208, 138, 0.85));
 }
 
 .nge-profile-chart-bar--completion {
   /* teal like the Cell Completions track and the cells pill, one colour for
      one quantity (was amber, the trophies' colour) */
-  background: linear-gradient(to top, rgba(95, 227, 245, 0.45), rgba(95, 227, 245, 0.85));
+  background: linear-gradient(to top, rgba(144, 255, 242, 0.45), rgba(144, 255, 242, 0.85));
   border-radius: 2px;
 }
 
@@ -3234,11 +3238,11 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 }
 
 .nge-profile-chart-legend-dot--edit {
-  background: rgba(74, 158, 255, 0.7);
+  background: rgba(255, 208, 138, 0.7);
 }
 
 .nge-profile-chart-legend-dot--completion {
-  background: rgba(95, 227, 245, 0.7);
+  background: rgba(144, 255, 242, 0.7);
 }
 
 /* ── Badges ── */
@@ -4562,15 +4566,40 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
    rows are shorter for it, with the shelf line redrawn under the art. */
 .nge-profile-col--center .nge-profile-badge .nge-profile-badge-name { display: none; }
 .nge-profile-col--center .nge-profile-badges-grid {
-  grid-auto-rows: 58px;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0px 54px,
-    rgba(130, 190, 255, 0.30) 54px 55px,
-    rgba(130, 190, 255, 0.08) 55px 57px,
-    transparent 57px 70px
-  );
+  grid-auto-rows: 56px;
+  /* no shelf line: with the names gone it read as a stray border under
+     each row (Ames 2026-10-11); the section's own border is enough */
+  background-image: none;
 }
+
+/* ── View all: a round button with a drawn arrow, not a dashed box with a
+   text arrow (Ames 2026-10-11) ── */
+.nge-profile-col--center .nge-profile-badge--viewall,
+.nge-profile-col--center .nge-profile-badge--viewall:hover { background: none; border: none; transform: none; }
+.nge-profile-col--center .nge-profile-badge--viewall .nge-profile-badge-img {
+  width: 42px; height: 42px; border-radius: 50%;
+  border: 1px solid rgba(140, 195, 255, 0.35);
+  background: rgba(74, 158, 255, 0.06);
+  color: rgba(170, 210, 255, 0.9);
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s, color 0.15s;
+}
+.nge-profile-col--center .nge-profile-badge--viewall:hover .nge-profile-badge-img {
+  border-color: rgba(170, 210, 255, 0.9);
+  background: rgba(74, 158, 255, 0.14);
+  box-shadow: 0 0 14px rgba(74, 158, 255, 0.35);
+  color: #fff;
+}
+.nge-profile-col--center .nge-profile-badge-viewall-icon { width: 20px; height: 20px; opacity: 1; transition: transform 0.15s; }
+.nge-profile-col--center .nge-profile-badge--viewall:hover .nge-profile-badge-viewall-icon { transform: translateX(2px); }
+
+/* ── The track colours, one per block (Ames 2026-10-11): cells sky blue,
+   edits gold, days purple, the colours the Achievement sections use ── */
+.nge-profile-section--completions > .nge-profile-section-label { color: #90fff2; }
+.nge-profile-section--edits > .nge-profile-section-label { color: #ffd08a; }
+.nge-profile-section--days > .nge-profile-section-label { color: #c9a8ff; }
+.nge-profile-section--days .nge-profile-stat-val--hero { color: #c9a8ff; text-shadow: 0 0 20px rgba(201, 168, 255, 0.3); }
+.nge-profile-section--completions .nge-profile-feature-icon { filter: drop-shadow(0 0 10px rgba(144, 255, 242, 0.35)); }
+.nge-profile-section--edits .nge-profile-feature-icon { filter: drop-shadow(0 0 10px rgba(255, 208, 138, 0.35)); }
 
 /* ── The right column's sections share one left edge ──────────────────────
    Top of the Week and Streak sat as narrow blocks centred under the art,
