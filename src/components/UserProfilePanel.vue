@@ -1287,14 +1287,23 @@ const emit = defineEmits({hide: null, 'open-settings': null});
           <div class="nge-track-rows">
 
             <div class="nge-track-row nge-track-row--cells">
+              <!-- One head for the row (Ames 2026-10-11): the label, a circuit
+                   trace drawn out along the top in the language of the layer
+                   tabs, lit as far as the count has come toward the next tier,
+                   and the count at its end. -->
+              <div class="nge-track-head" :style="{ '--track': '#90fff2', '--frac': (nextExplorationAchievement) ? (nextExplorationAchievement).pct / 100 : 1 }">
+                <div class="nge-profile-section-label" title="At the left, cells proofread all the way to completion in Pyr on this dataset; a cell completed again after an edit counts once. At the right, your Cell Completion Achievements.">▌ Cells completed</div>
+                <div class="nge-track-line" aria-hidden="true"></div>
+                <div class="nge-track-count" :title="(profileStats.cellsSubmitted ?? 0).toLocaleString() + ' cells completed on every dataset' + ((nextExplorationAchievement) ? ', ' + (nextExplorationAchievement).remaining.toLocaleString() + ' to go to the next Achievement' : '')">
+                  <RollUp :value="profileStats.cellsSubmitted ?? 0" /><span v-if="nextExplorationAchievement" class="nge-track-count-next"> / {{ (nextExplorationAchievement).threshold.toLocaleString() }}</span>
+                </div>
+              </div>
               <div class="nge-track-stats">
           <!-- Cells completed on this dataset, in the game, by the completed
                cell rule: the same three windows as edits, from the completions
                list with each cell's completion moment, and the same curve
                under them (Ames 2026-10-11). Shown on every profile. -->
           <div class="nge-profile-section nge-profile-section--completions nge-profile-section--windows">
-            <div class="nge-profile-section-label"
-                 title="Cells proofread all the way to completion in Pyr on this dataset. A cell completed again after an edit counts once. Cells marked in other tools are not counted.">▌ Cells completed</div>
             <div v-if="scopedCellsFailed" class="nge-profile-stat-unavailable">Not available right now</div>
             <div v-else class="nge-profile-feature-row">
               <!-- the latest Cell Completions Achievement; its name is the tooltip -->
@@ -1319,25 +1328,9 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
               </div>
               <div class="nge-track-achievements">
-                <!-- The stats are one dataset; achievements are a career. -->
-          <div v-if="activeDatasetCanon" class="nge-profile-career-note">Totals and achievements here count every dataset</div>
           <!-- Cell Completions (exploration track): first, above Editor
                Achievements (Ames 2026-10-08) -->
           <div class="nge-profile-section nge-profile-section--badges">
-            <div class="nge-profile-track-head">
-              <div class="nge-profile-section-label" style="color: #90fff2;">▌ Cell Completions</div>
-              <div class="nge-profile-track-total" style="--track: #90fff2;" title="Every cell completed, on every dataset">
-                <b><RollUp :value="profileStats.cellsSubmitted ?? 0" /></b> {{ (profileStats.cellsSubmitted ?? 0) === 1 ? 'cell completed' : 'cells completed' }}
-              </div>
-            </div>
-            <div class="nge-profile-countdown-inline" v-if="nextExplorationAchievement">
-              <div class="nge-profile-countdown-row">
-                <div class="nge-profile-countdown-remaining">{{ nextExplorationAchievement.remaining.toLocaleString() }} cells to go</div>
-              </div>
-              <div class="nge-profile-countdown-track">
-                <div class="nge-profile-countdown-fill nge-profile-countdown-fill--exploration" :style="{ width: nextExplorationAchievement.pct + '%' }"></div>
-              </div>
-            </div>
             <div class="nge-profile-badges-grid">
               <div
                 v-for="badge in displayedExplorationBadges"
@@ -1390,14 +1383,23 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             </div>
 
             <div class="nge-track-row nge-track-row--edits">
+              <!-- One head for the row (Ames 2026-10-11): the label, a circuit
+                   trace drawn out along the top in the language of the layer
+                   tabs, lit as far as the count has come toward the next tier,
+                   and the count at its end. -->
+              <div class="nge-track-head" :style="{ '--track': '#ffd08a', '--frac': (nextBuildingAchievement) ? (nextBuildingAchievement).pct / 100 : 1 }">
+                <div class="nge-profile-section-label" title="At the left, splits and merges you made in Pyr on this dataset; edits made in other tools, or before you joined, are not counted. At the right, your Editor Achievements.">▌ Edits in Pyr</div>
+                <div class="nge-track-line" aria-hidden="true"></div>
+                <div class="nge-track-count" :title="(profileStats.editsAllTime ?? 0).toLocaleString() + ' edits on every dataset' + ((nextBuildingAchievement) ? ', ' + (nextBuildingAchievement).remaining.toLocaleString() + ' to go to the next Achievement' : '')">
+                  <RollUp :value="profileStats.editsAllTime ?? 0" /><span v-if="nextBuildingAchievement" class="nge-track-count-next"> / {{ (nextBuildingAchievement).threshold.toLocaleString() }}</span>
+                </div>
+              </div>
               <div class="nge-track-stats">
           <!-- Edits stats -->
           <div class="nge-profile-section nge-profile-section--edits nge-profile-section--windows">
             <!-- Ames 2026-10-05: these count edits made in the game only.
                  A player with months of earlier work elsewhere read a small
                  number here as their work having gone missing. -->
-            <div class="nge-profile-section-label"
-                 title="Splits and merges you made in Pyr on this dataset. Edits made in other tools, or before you joined, are not counted.">▌ Edits in Pyr</div>
             <div class="nge-profile-feature-row">
               <!-- the latest Editor Achievement; its name is the tooltip -->
               <div v-if="latestBuildingBadge" class="nge-profile-feature" :title="badgeTooltip(latestBuildingBadge)" @click="onBadgeClick(latestBuildingBadge)">
@@ -1449,22 +1451,6 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               <div class="nge-track-achievements">
           <!-- Editor Achievements (building track) -->
           <div class="nge-profile-section nge-profile-section--badges">
-            <!-- The career total lives here, beside what it earns (Ames
-                 2026-10-07); the left column is the breakdown. -->
-            <div class="nge-profile-track-head">
-              <div class="nge-profile-section-label" style="color: #ffd08a;">▌ Editor Achievements</div>
-              <div class="nge-profile-track-total" style="--track: #ffd08a;" title="Every merge and cut made in Pyr, on every dataset">
-                <b><RollUp :value="profileStats.editsAllTime ?? 0" /></b> {{ (profileStats.editsAllTime ?? 0) === 1 ? 'edit' : 'edits' }}
-              </div>
-            </div>
-            <div class="nge-profile-countdown-inline" v-if="nextBuildingAchievement">
-              <div class="nge-profile-countdown-row">
-                <div class="nge-profile-countdown-remaining">{{ nextBuildingAchievement.remaining.toLocaleString() }} edits to go</div>
-              </div>
-              <div class="nge-profile-countdown-track">
-                <div class="nge-profile-countdown-fill nge-profile-countdown-fill--building" :style="{ width: nextBuildingAchievement.pct + '%' }"></div>
-              </div>
-            </div>
             <div class="nge-profile-badges-grid">
               <div
                 v-for="badge in displayedBuildingBadges"
@@ -1516,12 +1502,22 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             </div>
 
             <div v-if="totalDays > 0 || LOYALTY_BADGES.length" class="nge-track-row nge-track-row--days">
+              <!-- One head for the row (Ames 2026-10-11): the label, a circuit
+                   trace drawn out along the top in the language of the layer
+                   tabs, lit as far as the count has come toward the next tier,
+                   and the count at its end. -->
+              <div class="nge-track-head" :style="{ '--track': '#c9a8ff', '--frac': (nextLoyaltyAchievement) ? (nextLoyaltyAchievement).pct / 100 : 1 }">
+                <div class="nge-profile-section-label" title="Every day you have shown up, ever. At the right, your Days Achievements.">▌ Days helping science in Pyr</div>
+                <div class="nge-track-line" aria-hidden="true"></div>
+                <div class="nge-track-count" :title="(totalDays).toLocaleString() + ' days on every dataset' + ((nextLoyaltyAchievement) ? ', ' + (nextLoyaltyAchievement).remaining.toLocaleString() + ' to go to the next Achievement' : '')">
+                  <RollUp :value="totalDays" /><span v-if="nextLoyaltyAchievement" class="nge-track-count-next"> / {{ (nextLoyaltyAchievement).threshold.toLocaleString() }}</span>
+                </div>
+              </div>
               <div class="nge-track-stats">
           <!-- Days: total days shown up (never resets), the streaks, and the
                ladder of milestones (Ames 2026-10-06). Three plain columns, no
                boxes (Ames 2026-10-11). -->
           <div v-if="totalDays > 0" class="nge-profile-section nge-profile-section--days">
-            <div class="nge-profile-section-label">▌ Days helping science in Pyr</div>
             <div class="nge-profile-days-row">
               <!-- The latest Days Achievement, at the left. Streak and best
                    streak are not repeated here: they sit on the right under
@@ -1543,15 +1539,6 @@ const emit = defineEmits({hide: null, 'open-settings': null});
           <!-- Loyalty Achievements: total days, not in a row (Ames 2026-10-06).
                Hidden while the set is switched off (LOYALTY_ENABLED). -->
           <div v-if="LOYALTY_BADGES.length" class="nge-profile-section nge-profile-section--badges">
-            <div class="nge-profile-section-label" style="color: #c9a8ff;">▌ Loyalty Achievements</div>
-            <div class="nge-profile-countdown-inline" v-if="nextLoyaltyAchievement">
-              <div class="nge-profile-countdown-row">
-                <div class="nge-profile-countdown-remaining">{{ nextLoyaltyAchievement.remaining }} {{ nextLoyaltyAchievement.remaining === 1 ? 'day' : 'days' }} to go</div>
-              </div>
-              <div class="nge-profile-countdown-track">
-                <div class="nge-profile-countdown-fill nge-profile-countdown-fill--loyalty" :style="{ width: nextLoyaltyAchievement.pct + '%' }"></div>
-              </div>
-            </div>
             <div class="nge-profile-badges-grid">
               <div
                 v-for="badge in earnedLoyaltyBadges.earned.slice(1, 5)"
@@ -1743,6 +1730,9 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               </div>
             </div>
 
+            <!-- the stats at the left are this dataset's; the Achievements and
+                 the counts in the heads are a career -->
+            <div v-if="activeDatasetCanon" class="nge-profile-career-note nge-profile-career-note--foot">The counts beside the Achievements are for every dataset.</div>
           </div>
         </div><!-- end main area -->
 
@@ -4624,6 +4614,41 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
   padding: 16px 0 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
+/* ── The row's head: the label, a circuit trace, the count ───────────────
+   Instead of a second header on the right, one line across the row, in the
+   language of the layer tabs: a 1.4px trace that draws out from the label,
+   lit as far as the count has come toward the next tier, ending on a pad
+   beside the count (Ames 2026-10-11). */
+@property --nge-track-run { syntax: '<number>'; inherits: false; initial-value: 1; }
+.nge-track-head {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 12px;
+}
+.nge-track-head .nge-profile-section-label { margin-bottom: 0; white-space: nowrap; color: var(--track); }
+.nge-track-line {
+  flex: 1 1 0; min-width: 40px; height: 9px;
+  --nge-track-run: 1;
+  --pad: color-mix(in srgb, var(--track) 70%, transparent);
+  background:
+    radial-gradient(circle at calc(100% - 4px) 50%, #0a1223 0 0.9px, var(--pad) 1.3px 2.1px, transparent 2.5px),
+    linear-gradient(var(--track), var(--track)) left 50% / calc((100% - 10px) * var(--frac, 1) * var(--nge-track-run)) 1.4px no-repeat,
+    linear-gradient(rgba(201, 228, 255, 0.14), rgba(201, 228, 255, 0.14)) left 50% / calc(100% - 10px) 1.4px no-repeat;
+  animation: ngeTrackRun 720ms cubic-bezier(0.3, 0, 0.2, 1) 1 both;
+}
+.nge-track-row--edits .nge-track-line { animation-delay: 120ms; }
+.nge-track-row--days .nge-track-line { animation-delay: 240ms; }
+@keyframes ngeTrackRun { 0% { --nge-track-run: 0; } 100% { --nge-track-run: 1; } }
+@media (prefers-reduced-motion: reduce) { .nge-track-line { animation: none; } }
+.nge-track-count {
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700; font-size: 1.05em; white-space: nowrap;
+  color: var(--track);
+  cursor: help;
+}
+.nge-track-count-next { font-weight: 600; opacity: 0.6; }
+.nge-profile-career-note--foot { margin: 10px 0 0; }
 .nge-track-row:last-child { border-bottom: none; }
 .nge-track-stats, .nge-track-achievements { min-width: 0; }
 .nge-track-achievements {
