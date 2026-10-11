@@ -8,7 +8,8 @@
         "Your profile now fills the whole window, with more room for everything in it.",
         "Cells completed now shows today, the past 7 days and all time for the dataset you are on, the same three windows as edits.",
         "Above each, a small curve draws your running total from your first day to today, with the past 7 days and today marked on it. Point at it to read any day.",
-        "Days as a citizen scientist shows your latest Days Achievement beside your total. Your streak stays on the right.",
+        "The latest Achievement you earned sits beside your cells, your edits and your days. Achievement names now show when you point at them.",
+        "Days helping science in Pyr shows your latest Days Achievement beside your total. Your streak stays on the right.",
         "Your recently completed cells are listed on this dataset even on a new device.",
         "If you have a username, your profile is titled with it.",
         "Completions on the Last 14 Days chart are now teal, matching the Cell Completions track."

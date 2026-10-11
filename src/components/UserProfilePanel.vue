@@ -546,8 +546,11 @@ const earnedLoyaltyBadges = computed(() => {
 /** Most recently earned badge (highest threshold among earned). Loyalty is
  *  left out: its thresholds are days, not edits or cells, so they do not
  *  compare. */
-/** The latest Days Achievement: the loyalty track's newest earned one. */
+/** The latest Achievement of each track, featured beside that track's
+ *  numbers in the left column (Ames 2026-10-11). Each list is newest first. */
 const latestLoyaltyBadge = computed<BadgeDefinition | null>(() => earnedLoyaltyBadges.value.earned[0] ?? null);
+const latestExplorationBadge = computed<BadgeDefinition | null>(() => earnedExplorationBadges.value.earned[0] ?? null);
+const latestBuildingBadge = computed<BadgeDefinition | null>(() => earnedBuildingBadges.value.earned[0] ?? null);
 
 const latestEarnedBadge = computed(() => {
   const allEarned = BADGE_DEFINITIONS.filter(b => b.track !== 'loyalty' && isBadgeEarned(b));
@@ -751,19 +754,20 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// The latest of each track is featured beside its numbers in the left
+// column, so these rows start with the one before it (Ames 2026-10-11).
 const displayedBuildingBadges = computed(() => {
-  const all = earnedBuildingBadges.value.earned;
+  const all = earnedBuildingBadges.value.earned.slice(1);
   if (showAllBuilding.value) return all;
-  // When earned >= 8: show 7 + "View All" tile (8 total slots).
   return all.length >= BADGE_PREVIEW_LIMIT ? all.slice(0, BADGE_PREVIEW_WITH_VIEWALL) : all.slice(0, BADGE_PREVIEW_LIMIT);
 });
 const displayedExplorationBadges = computed(() => {
-  const all = earnedExplorationBadges.value.earned;
+  const all = earnedExplorationBadges.value.earned.slice(1);
   if (showAllExploration.value) return all;
   return all.length >= BADGE_PREVIEW_LIMIT ? all.slice(0, BADGE_PREVIEW_WITH_VIEWALL) : all.slice(0, BADGE_PREVIEW_LIMIT);
 });
-const showBuildingViewAll = computed(() => earnedBuildingBadges.value.earned.length >= BADGE_PREVIEW_LIMIT);
-const showExplorationViewAll = computed(() => earnedExplorationBadges.value.earned.length >= BADGE_PREVIEW_LIMIT);
+const showBuildingViewAll = computed(() => earnedBuildingBadges.value.earned.length - 1 >= BADGE_PREVIEW_LIMIT);
+const showExplorationViewAll = computed(() => earnedExplorationBadges.value.earned.length - 1 >= BADGE_PREVIEW_LIMIT);
 
 // ── Special Awards "View all" preview ───────────────────────────────────────
 const displayedSpecialBadges = computed(() => {
@@ -777,7 +781,7 @@ const showSpecialViewAll = computed(() => profileSpecialBadges.value.length > SP
 function badgeTooltip(badge: BadgeDefinition): string {
   // Loyalty (Ames 2026-10-06): "Earned for n days of science", on its own line.
   if (badge.track === 'loyalty') return `${badge.name}\nEarned for ${badge.threshold.toLocaleString()} ${unitForTrack('loyalty', badge.threshold)}`;
-  return `${badge.name} — Earned for ${badge.threshold.toLocaleString()} ${unitForTrack(badge.track, badge.threshold)}`;
+  return `${badge.name}, earned for ${badge.threshold.toLocaleString()} ${unitForTrack(badge.track, badge.threshold)}`;
 }
 function specialBadgeTooltip(award: any): string {
   const name = award.badge?.name || 'Award';
@@ -1283,7 +1287,12 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             <div class="nge-profile-section-label"
                  title="Cells proofread all the way to completion in Pyr on this dataset. A cell completed again after an edit counts once. Cells marked in other tools are not counted.">▌ Cells completed</div>
             <div v-if="scopedCellsFailed" class="nge-profile-stat-unavailable">Not available right now</div>
-            <div v-else class="nge-profile-windows">
+            <div v-else class="nge-profile-feature-row">
+              <!-- the latest Cell Completions Achievement; its name is the tooltip -->
+              <div v-if="latestExplorationBadge" class="nge-profile-feature" :title="badgeTooltip(latestExplorationBadge)" @click="onBadgeClick(latestExplorationBadge)">
+                <img :src="getBadgeUrl(latestExplorationBadge.imageKey)" :alt="latestExplorationBadge.name" class="nge-profile-feature-icon" :class="`nge-badge--${latestExplorationBadge.slug}`" />
+              </div>
+            <div class="nge-profile-windows">
               <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="95 227 245" unit="cells" />
               <div class="nge-profile-stat-row">
                 <div class="nge-profile-stat-col" v-for="(col, i) in [
@@ -1296,6 +1305,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 </div>
               </div>
             </div>
+            </div>
           </div>
 
           <!-- Edits stats -->
@@ -1305,6 +1315,11 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                  number here as their work having gone missing. -->
             <div class="nge-profile-section-label"
                  title="Splits and merges you made in Pyr on this dataset. Edits made in other tools, or before you joined, are not counted.">▌ Edits in Pyr</div>
+            <div class="nge-profile-feature-row">
+              <!-- the latest Editor Achievement; its name is the tooltip -->
+              <div v-if="latestBuildingBadge" class="nge-profile-feature" :title="badgeTooltip(latestBuildingBadge)" @click="onBadgeClick(latestBuildingBadge)">
+                <img :src="getBadgeUrl(latestBuildingBadge.imageKey)" :alt="latestBuildingBadge.name" class="nge-profile-feature-icon" :class="`nge-badge--${latestBuildingBadge.slug}`" />
+              </div>
             <div class="nge-profile-windows">
             <!-- The same rows as the three numbers, as a line from the first
                  day to today (Ames 2026-10-11). Nothing while they load, and
@@ -1344,20 +1359,20 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               </div>
             </div>
             </div>
+            </div>
           </div>
 
           <!-- Days: total days shown up (never resets), the streaks, and the
                ladder of milestones (Ames 2026-10-06). Three plain columns, no
                boxes (Ames 2026-10-11). -->
           <div v-if="totalDays > 0" class="nge-profile-section nge-profile-section--days">
-            <div class="nge-profile-section-label">▌ Days as a citizen scientist</div>
+            <div class="nge-profile-section-label">▌ Days helping science in Pyr</div>
             <div class="nge-profile-days-row">
               <!-- The latest Days Achievement, at the left. Streak and best
                    streak are not repeated here: they sit on the right under
                    Streak (Ames 2026-10-11). -->
               <div v-if="latestLoyaltyBadge" class="nge-profile-feature" :title="badgeTooltip(latestLoyaltyBadge)" @click="onBadgeClick(latestLoyaltyBadge)">
                 <img :src="getBadgeUrl(latestLoyaltyBadge.imageKey)" :alt="latestLoyaltyBadge.name" class="nge-profile-feature-icon" :class="`nge-badge--${latestLoyaltyBadge.slug}`" />
-                <div class="nge-profile-feature-name">{{ latestLoyaltyBadge.name }}</div>
               </div>
               <div class="nge-profile-stat-col" title="Every day you have shown up, ever. This never resets.">
                 <div class="nge-profile-stat-label">Total days</div>
@@ -1628,7 +1643,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             </div>
             <div class="nge-profile-badges-grid">
               <div
-                v-for="badge in earnedLoyaltyBadges.earned.slice(0, 4)"
+                v-for="badge in earnedLoyaltyBadges.earned.slice(1, 5)"
                 :key="badge.id"
                 class="nge-profile-badge nge-profile-badge--loyalty"
                 :class="{ 'nge-profile-badge--selected': selectedBadge?.id === badge.id }"
@@ -1641,7 +1656,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 <div class="nge-profile-badge-name">{{ badge.name }}</div>
               </div>
               <div
-                v-if="earnedLoyaltyBadges.next && earnedLoyaltyBadges.earned.length < 4"
+                v-if="earnedLoyaltyBadges.next && earnedLoyaltyBadges.earned.length < 5"
                 class="nge-profile-badge nge-profile-badge--locked"
                 :title="`Next: ${earnedLoyaltyBadges.next.threshold} days of science`"
               >
@@ -1652,7 +1667,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 </div>
               </div>
               <div
-                v-if="earnedLoyaltyBadges.earned.length >= 4"
+                v-if="earnedLoyaltyBadges.earned.length >= 5"
                 class="nge-profile-badge nge-profile-badge--viewall"
                 title="View all achievements in Trophy Case"
                 @click="activeTab = 'trophyCase'"
@@ -4537,7 +4552,33 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
 }
 .nge-profile-feature:hover { background: rgba(74, 158, 255, 0.06); transform: translateY(-1px); }
 .nge-profile-feature-icon { width: 64px; height: 64px; object-fit: contain; filter: drop-shadow(0 0 10px rgba(201, 168, 255, 0.35)); }
-.nge-profile-feature-name { font-size: 0.72em; color: #cfd8e8; margin-top: 4px; line-height: 1.2; }
+/* the same beside the cells and edits numbers: the art at the left, the
+   curve and the three windows to its right */
+.nge-profile-feature-row { display: flex; align-items: center; gap: 20px; }
+.nge-profile-feature-row > .nge-profile-windows { flex: 1 1 0; min-width: 0; }
+
+/* ── Achievement names are tooltips, not labels (Ames 2026-10-11) ─────────
+   The Overview's rows show the art alone; the name shows on hover. The
+   rows are shorter for it, with the shelf line redrawn under the art. */
+.nge-profile-col--center .nge-profile-badge .nge-profile-badge-name { display: none; }
+.nge-profile-col--center .nge-profile-badges-grid {
+  grid-auto-rows: 58px;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px 54px,
+    rgba(130, 190, 255, 0.30) 54px 55px,
+    rgba(130, 190, 255, 0.08) 55px 57px,
+    transparent 57px 70px
+  );
+}
+
+/* ── The right column's sections share one left edge ──────────────────────
+   Top of the Week and Streak sat as narrow blocks centred under the art,
+   so their labels floated (Ames 2026-10-11). */
+.nge-profile-col--right > .nge-profile-section--podium,
+.nge-profile-col--right > .nge-profile-section--streak,
+.nge-profile-col--right > .nge-profile-right-divider { align-self: stretch; }
+.nge-profile-col--right .nge-profile-activity-chart { max-width: 340px; }
 /* A number that can not be read says so; it is never shown as zero. */
 .nge-profile-stat-unavailable { font-size: 0.82em; color: rgba(200, 215, 240, 0.55); }
 </style>
