@@ -35,6 +35,8 @@ const props = defineProps<{
   color: string;
   /** The word after a number: 'edits', 'cells'. */
   unit: string;
+  /** Drawn height in px; 76 by default, less on a short screen. */
+  height?: number;
 }>();
 
 const fig = ref<HTMLElement | null>(null);
@@ -83,7 +85,7 @@ function render(animate: boolean) {
   const total = s, max = Math.max(1, total);
   summary.value = `${total.toLocaleString()} ${props.unit} since ${startLabel.value}`;
 
-  const W = Math.max(120, Math.round(host.getBoundingClientRect().width)) || 400, H = 76;
+  const W = Math.max(120, Math.round(host.getBoundingClientRect().width)) || 400, H = props.height ?? 76;
   drawnWidth = W;
   const P = { l: 1, r: 1, t: 18, b: 4 }, iw = W - P.l - P.r, ih = H - P.t - P.b, base = P.t + ih;
   const X = (i: number) => P.l + (N > 1 ? i / (N - 1) : 1) * iw;
@@ -204,11 +206,12 @@ onMounted(() => {
   }
 });
 watch(() => props.days, () => render(true));
+watch(() => props.height, () => render(false));
 onBeforeUnmount(() => { clear(); ro?.disconnect(); ro = null; });
 </script>
 
 <template>
-  <figure ref="fig" class="nge-effort" :class="{ 'is-done': done }" :style="{ '--c': color }" :aria-label="summary">
+  <figure ref="fig" class="nge-effort" :class="{ 'is-done': done }" :style="{ '--c': color, '--h': (height ?? 76) + 'px' }" :aria-label="summary">
     <figcaption class="nge-effort-cap"><span>{{ startLabel }}</span><span v-if="startLabel">Today</span></figcaption>
   </figure>
 </template>
@@ -216,7 +219,7 @@ onBeforeUnmount(() => { clear(); ro?.disconnect(); ro = null; });
 <style scoped>
 .nge-effort { margin: 10px 0 0; position: relative; min-width: 0; }
 .nge-effort :deep(.nge-effort-svg) {
-  display: block; width: 100%; height: 76px; overflow: visible;
+  display: block; width: 100%; height: var(--h, 76px); overflow: visible;
   touch-action: pan-y;
 }
 .nge-effort :deep(.nge-effort-band) { fill: rgb(var(--c) / .05); }

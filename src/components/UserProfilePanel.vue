@@ -546,6 +546,15 @@ const earnedLoyaltyBadges = computed(() => {
 /** Most recently earned badge (highest threshold among earned). Loyalty is
  *  left out: its thresholds are days, not edits or cells, so they do not
  *  compare. */
+/** Short screens (laptops): the rows draw smaller so the list under them
+ *  is reachable (Ames 2026-10-11: "did you leave room for the my cells list
+ *  on laptop screens?"). */
+const compactMq = window.matchMedia('(max-height: 840px)');
+const compactRows = ref(compactMq.matches);
+const onCompactChange = (e: MediaQueryListEvent) => { compactRows.value = e.matches; };
+compactMq.addEventListener('change', onCompactChange);
+onUnmounted(() => compactMq.removeEventListener('change', onCompactChange));
+
 /** The latest Achievement of each track, featured beside that track's
  *  numbers in the left column (Ames 2026-10-11). Each list is newest first. */
 const latestLoyaltyBadge = computed<BadgeDefinition | null>(() => earnedLoyaltyBadges.value.earned[0] ?? null);
@@ -860,7 +869,7 @@ const scopedEditDays = ref<EffortDay[] | null>(null);
 const scopedCells = ref<{ today: number; week: number; all: number } | null>(null);
 const scopedCellDays = ref<EffortDay[] | null>(null);
 /** The matched completion rows, newest first, for the recent cells list. */
-const scopedCompletionRows = ref<Array<{ cell: string; done_at: string }> | null>(null);
+const scopedCompletionRows = ref<Array<{ cell: string; done_at: string; dataset: string }> | null>(null);
 const scopedCellsFailed = ref(false);
 let scopedCellsReq = 0;
 /** Zeros while loading, never another dataset's numbers. */
@@ -898,8 +907,11 @@ async function loadScopedEdits() {
   const canon = activeDatasetCanon.value;
   const req = ++scopedEditsReq;
   scopedEditsFailed.value = false;
-  if (!uid || !canon) { scopedEdits.value = null; scopedEditDays.value = null; return; }
-  const tags = scopeDataset.value ? datasetTagVariants(scopeDataset.value) : [canon];
+  // Every Pyr dataset (Ames 2026-10-11: the profile is your work in Pyr,
+  // not the dataset on screen; her 118 cells were on other datasets and the
+  // Sandbox profile said 0). Only the game's own log, as before.
+  void canon;
+  if (!uid) { scopedEdits.value = null; scopedEditDays.value = null; return; }
   try {
     const { supabase } = await import('../supabase');
     const rows: Array<{ operation: string; timestamp: string; success: boolean | null }> = [];
@@ -907,7 +919,7 @@ async function loadScopedEdits() {
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabase.from('edit_log')
         .select('operation, timestamp, success')
-        .eq('user_id', uid).in('dataset', tags).in('operation', ['merge', 'split'])
+        .eq('user_id', uid).in('operation', ['merge', 'split'])
         .order('id', { ascending: true })
         .range(from, from + PAGE - 1);
       if (error) throw error;
@@ -952,8 +964,8 @@ async function loadScopedCompletions() {
   const canon = activeDatasetCanon.value;
   const req = ++scopedCellsReq;
   scopedCellsFailed.value = false;
-  if (!uid || !canon) { scopedCells.value = null; scopedCellDays.value = null; scopedCompletionRows.value = null; return; }
-  const keys = new Set((scopeDataset.value ? datasetTagVariants(scopeDataset.value) : [canon]).map(datasetKey));
+  void canon;
+  if (!uid) { scopedCells.value = null; scopedCellDays.value = null; scopedCompletionRows.value = null; return; }
   try {
     const { supabase } = await import('../supabase');
     const rows: Array<{ dataset: string; cell: string; done_at: string }> = [];
@@ -970,20 +982,19 @@ async function loadScopedCompletions() {
     const weekAgo = Date.now() - 7 * 86400000;
     const out = { today: 0, week: 0, all: 0 };
     const stamps: number[] = [];
-    const kept: Array<{ cell: string; done_at: string; t: number }> = [];
+    const kept: Array<{ cell: string; done_at: string; dataset: string; t: number }> = [];
     for (const r of rows) {
-      if (!keys.has(datasetKey(r.dataset))) continue;
       const t = new Date(r.done_at).getTime();
       if (!Number.isFinite(t)) continue;
       stamps.push(t);
-      kept.push({ cell: String(r.cell), done_at: r.done_at, t });
+      kept.push({ cell: String(r.cell), done_at: r.done_at, dataset: String(r.dataset ?? ''), t });
       out.all++;
       if (t >= weekAgo) out.week++;
       if (t >= startOfToday.getTime()) out.today++;
     }
     scopedCells.value = out;
     scopedCellDays.value = denseDays(stamps);
-    scopedCompletionRows.value = kept.sort((a, b) => b.t - a.t).map(r => ({ cell: r.cell, done_at: r.done_at }));
+    scopedCompletionRows.value = kept.sort((a, b) => b.t - a.t).map(r => ({ cell: r.cell, done_at: r.done_at, dataset: r.dataset }));
   } catch (e) {
     if (req !== scopedCellsReq) return;
     console.warn('[profile] per-dataset completions failed:', e);
@@ -1005,7 +1016,7 @@ const overviewEdits = computed(() => {
   const s = scopedEdits.value;
   if (s) return s;
   const p = profileStats.value;
-  if (scopedEditsFailed.value || !activeDatasetCanon.value) {
+  if (scopedEditsFailed.value) {
     return {
       today: { edits: p.editsToday, merges: p.mergesToday, splits: p.splitsToday },
       week:  { edits: p.editsThisWeek, merges: p.mergesThisWeek, splits: p.splitsThisWeek },
@@ -1046,11 +1057,11 @@ const filteredCellHistory = computed(() => {
  *  Cells completed numbers (Ames 2026-10-11: "what happened to the list of my
  *  recently completed cells?"). Server rows carry no type, name or favorite. */
 const recentCells = computed<Array<CellHistoryEntry & { serverOnly?: boolean }>>(() => {
-  const done = filteredCellHistory.value.filter(c => c.isComplete);
+  const done = cellHistory.value.filter(c => c.isComplete);
   if (done.length) return done;
   return (scopedCompletionRows.value ?? []).map(r => ({
     segId: r.cell, isComplete: true, cellType: '', position: [0, 0, 0] as [number, number, number],
-    updatedAt: r.done_at, dataset: activeDatasetCanon.value, serverOnly: true,
+    updatedAt: r.done_at, dataset: r.dataset, serverOnly: true,
   }));
 });
 
@@ -1145,15 +1156,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                up here, in the bar's own style, instead of a box in the column
                and the username, which is already shown below). Clicking opens
                the Datasets tab, where every dataset's totals sit side by side. -->
-          <button
-            v-if="activeTab === 'overview' && activeDatasetCanon"
-            class="nge-profile-topbar-scope"
-            :class="{ 'nge-profile-topbar-scope--fallback': !editsScoped }"
-            :title="editsScoped ? 'The numbers on this page are for this dataset only. Click to compare datasets.' : 'Per-dataset edits could not be loaded, so Edits shows all datasets.'"
-            @click="activeTab = 'datasets'"
-          ><span class="nge-profile-topbar-sep">·</span> {{ editsScoped ? 'Stats for' : 'Cells for' }}
-            <span class="nge-profile-topbar-scope-icon">{{ scopeDataset ? SPECIES_ICONS[scopeDataset.species] : '🧬' }}</span>
-            <span class="nge-profile-topbar-scope-name">{{ scopeLabel }}</span> ›</button>
+          <!-- the dataset scope button went with the per dataset Overview (Ames 2026-10-11) -->
         </span>
         <button class="nge-profile-exit" @click="handleClose">×</button>
       </div>
@@ -1225,7 +1228,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
              track, so the rows line up across: a track's stats and curve beside
              its Achievements (Ames 2026-10-11, "make sure the rows are aligned,
              like across cells, edits, loyalty"). The last row holds the rest. -->
-        <div class="nge-profile-col nge-profile-col--left nge-profile-col--main">
+        <div class="nge-profile-col nge-profile-col--left nge-profile-col--main" :class="{ 'is-compact': compactRows }">
 
           <!-- Header -->
           <div class="nge-profile-header" v-if="sessions.length > 0 || viewingOtherUser">
@@ -1288,14 +1291,18 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
             <div class="nge-track-row nge-track-row--cells">
               <!-- One head for the row (Ames 2026-10-11): the label, a circuit
-                   trace drawn out along the top in the language of the layer
-                   tabs, lit as far as the count has come toward the next tier,
-                   and the count at its end. -->
+                   trace drawn out to a pad, a gap, a second pad, and from it the
+                   bar toward the next Achievement, lit as far as you have come,
+                   with how many to go at its end. The language of the layer
+                   tabs, where a trace breaks at a component. -->
               <div class="nge-track-head" :style="{ '--track': '#90fff2', '--frac': (nextExplorationAchievement) ? (nextExplorationAchievement).pct / 100 : 1 }">
-                <div class="nge-profile-section-label" title="At the left, cells proofread all the way to completion in Pyr on this dataset; a cell completed again after an edit counts once. At the right, your Cell Completion Achievements.">▌ Cells completed</div>
-                <div class="nge-track-line" aria-hidden="true"></div>
-                <div class="nge-track-count" :title="(profileStats.cellsSubmitted ?? 0).toLocaleString() + ' cells completed on every dataset' + ((nextExplorationAchievement) ? ', ' + (nextExplorationAchievement).remaining.toLocaleString() + ' to go to the next Achievement' : '')">
-                  <RollUp :value="profileStats.cellsSubmitted ?? 0" /><span v-if="nextExplorationAchievement" class="nge-track-count-next"> / {{ (nextExplorationAchievement).threshold.toLocaleString() }}</span>
+                <div class="nge-track-head-left">
+                  <div class="nge-profile-section-label" title="Cells proofread all the way to completion in Pyr, on any of its datasets; a cell completed again after an edit counts once. Cells marked in other tools are not counted. At the right, your Cell Completion Achievements.">▌ Cells completed</div>
+                  <div class="nge-track-wire" aria-hidden="true"></div>
+                </div>
+                <div class="nge-track-head-right">
+                  <div class="nge-track-bar" :title="(nextExplorationAchievement) ? (nextExplorationAchievement).pct + '% of the way to your next Achievement' : 'Every Achievement on this track is yours'"></div>
+                  <div v-if="nextExplorationAchievement" class="nge-track-count" :title="(nextExplorationAchievement).remaining.toLocaleString() + ' more cells to your next Achievement'"><RollUp :value="(nextExplorationAchievement).remaining" /> to go</div>
                 </div>
               </div>
               <div class="nge-track-stats">
@@ -1311,7 +1318,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 <img :src="getBadgeUrl(latestExplorationBadge.imageKey)" :alt="latestExplorationBadge.name" class="nge-profile-feature-icon" :class="`nge-badge--${latestExplorationBadge.slug}`" />
               </div>
             <div class="nge-profile-windows">
-              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="144 255 242" unit="cells" />
+              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="144 255 242" unit="cells" :height="compactRows ? 48 : 76" />
               <div class="nge-profile-stat-row">
                 <div class="nge-profile-stat-col" v-for="(col, i) in [
                   {label:'Today',    val:overviewCells.today},
@@ -1384,14 +1391,18 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
             <div class="nge-track-row nge-track-row--edits">
               <!-- One head for the row (Ames 2026-10-11): the label, a circuit
-                   trace drawn out along the top in the language of the layer
-                   tabs, lit as far as the count has come toward the next tier,
-                   and the count at its end. -->
+                   trace drawn out to a pad, a gap, a second pad, and from it the
+                   bar toward the next Achievement, lit as far as you have come,
+                   with how many to go at its end. The language of the layer
+                   tabs, where a trace breaks at a component. -->
               <div class="nge-track-head" :style="{ '--track': '#ffd08a', '--frac': (nextBuildingAchievement) ? (nextBuildingAchievement).pct / 100 : 1 }">
-                <div class="nge-profile-section-label" title="At the left, splits and merges you made in Pyr on this dataset; edits made in other tools, or before you joined, are not counted. At the right, your Editor Achievements.">▌ Edits in Pyr</div>
-                <div class="nge-track-line" aria-hidden="true"></div>
-                <div class="nge-track-count" :title="(profileStats.editsAllTime ?? 0).toLocaleString() + ' edits on every dataset' + ((nextBuildingAchievement) ? ', ' + (nextBuildingAchievement).remaining.toLocaleString() + ' to go to the next Achievement' : '')">
-                  <RollUp :value="profileStats.editsAllTime ?? 0" /><span v-if="nextBuildingAchievement" class="nge-track-count-next"> / {{ (nextBuildingAchievement).threshold.toLocaleString() }}</span>
+                <div class="nge-track-head-left">
+                  <div class="nge-profile-section-label" title="Splits and merges you made in Pyr, on any of its datasets; edits made in other tools, or before you joined, are not counted. At the right, your Editor Achievements.">▌ Edits in Pyr</div>
+                  <div class="nge-track-wire" aria-hidden="true"></div>
+                </div>
+                <div class="nge-track-head-right">
+                  <div class="nge-track-bar" :title="(nextBuildingAchievement) ? (nextBuildingAchievement).pct + '% of the way to your next Achievement' : 'Every Achievement on this track is yours'"></div>
+                  <div v-if="nextBuildingAchievement" class="nge-track-count" :title="(nextBuildingAchievement).remaining.toLocaleString() + ' more edits to your next Achievement'"><RollUp :value="(nextBuildingAchievement).remaining" /> to go</div>
                 </div>
               </div>
               <div class="nge-track-stats">
@@ -1409,7 +1420,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             <!-- The same rows as the three numbers, as a line from the first
                  day to today (Ames 2026-10-11). Nothing while they load, and
                  nothing for the career fallback, which has no days. -->
-            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="255 208 138" unit="edits" />
+            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="255 208 138" unit="edits" :height="compactRows ? 48 : 76" />
             <div class="nge-profile-stat-row">
               <div class="nge-profile-stat-col" v-for="(col, i) in [
                 {label:'Today',    val:overviewEdits.today.edits, merges:overviewEdits.today.merges, splits:overviewEdits.today.splits},
@@ -1503,14 +1514,18 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
             <div v-if="totalDays > 0 || LOYALTY_BADGES.length" class="nge-track-row nge-track-row--days">
               <!-- One head for the row (Ames 2026-10-11): the label, a circuit
-                   trace drawn out along the top in the language of the layer
-                   tabs, lit as far as the count has come toward the next tier,
-                   and the count at its end. -->
+                   trace drawn out to a pad, a gap, a second pad, and from it the
+                   bar toward the next Achievement, lit as far as you have come,
+                   with how many to go at its end. The language of the layer
+                   tabs, where a trace breaks at a component. -->
               <div class="nge-track-head" :style="{ '--track': '#c9a8ff', '--frac': (nextLoyaltyAchievement) ? (nextLoyaltyAchievement).pct / 100 : 1 }">
-                <div class="nge-profile-section-label" title="Every day you have shown up, ever. At the right, your Days Achievements.">▌ Days helping science in Pyr</div>
-                <div class="nge-track-line" aria-hidden="true"></div>
-                <div class="nge-track-count" :title="(totalDays).toLocaleString() + ' days on every dataset' + ((nextLoyaltyAchievement) ? ', ' + (nextLoyaltyAchievement).remaining.toLocaleString() + ' to go to the next Achievement' : '')">
-                  <RollUp :value="totalDays" /><span v-if="nextLoyaltyAchievement" class="nge-track-count-next"> / {{ (nextLoyaltyAchievement).threshold.toLocaleString() }}</span>
+                <div class="nge-track-head-left">
+                  <div class="nge-profile-section-label" title="Every day you have shown up, ever. At the right, your Days Achievements.">▌ Days helping science in Pyr</div>
+                  <div class="nge-track-wire" aria-hidden="true"></div>
+                </div>
+                <div class="nge-track-head-right">
+                  <div class="nge-track-bar" :title="(nextLoyaltyAchievement) ? (nextLoyaltyAchievement).pct + '% of the way to your next Achievement' : 'Every Achievement on this track is yours'"></div>
+                  <div v-if="nextLoyaltyAchievement" class="nge-track-count" :title="(nextLoyaltyAchievement).remaining.toLocaleString() + ' more days to your next Achievement'"><RollUp :value="(nextLoyaltyAchievement).remaining" /> to go</div>
                 </div>
               </div>
               <div class="nge-track-stats">
@@ -1586,27 +1601,54 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
             <div class="nge-track-row nge-track-row--rest">
               <div class="nge-track-stats">
-          <!-- Building Pyr: how much has been built, from GitHub. Only on
-               the profile of the person building it (Ames 2026-10-10). -->
-          <div v-if="showsBuilding && repoStats" class="nge-profile-section nge-profile-section--building">
-            <div class="nge-profile-section-label">▌ Building Pyr</div>
-            <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
-              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Changes saved to Pyr's code">
-                <div class="nge-profile-stat-label">Commits</div>
-                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.commits" /></div>
-              </div>
-              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Times a new version of Pyr has gone live">
-                <div class="nge-profile-stat-label">Deploys</div>
-                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.deploys" /></div>
-              </div>
-            </div>
-          </div>
-
           <!-- Scout report (your tags) and the recent cells list. The list is
                the browser's own history of cells worked on here; when that is
                empty it is the cells completed on this dataset from the server's
                list (recentCells). -->
           <div class="nge-profile-section nge-profile-section--cells">
+            <div class="nge-cell-list" v-if="recentCells.length > 0">
+              <div class="nge-cell-list-header">
+                <span class="nge-cell-list-title">{{ viewingOtherUser ? 'Recently completed cells' : 'My recently completed cells' }}</span>
+                <button class="nge-cell-list-all" @click="activeTab = 'myCells'" title="Every cell, by dataset">{{ viewingOtherUser ? 'All cells' : 'My cells' }} →</button>
+              </div>
+              <div class="nge-cell-list-columns">
+                <span class="nge-cell-col-label nge-cell-col-label--id">Segment</span>
+                <span class="nge-cell-col-label nge-cell-col-label--type">Type</span>
+                <span class="nge-cell-col-label nge-cell-col-label--time">When</span>
+              </div>
+              <div class="nge-cell-list-scroll">
+                <div
+                  v-for="cell in recentCells.slice(0, 50)"
+                  :key="cell.segId"
+                  class="nge-cell-row"
+                  :title="cell.nickname ? `${cell.nickname} (${cell.segId})` : `Jump to ${cell.segId}`"
+                >
+                  <button
+                    v-if="!cell.serverOnly"
+                    class="nge-cell-fav"
+                    :class="{ 'nge-cell-fav--active': cell.isFavorite }"
+                    @click.stop="historyStore.toggleFavorite(cell.segId)"
+                    title="Toggle favorite"
+                  >{{ cell.isFavorite ? '★' : '☆' }}</button>
+                  <span class="nge-cell-pip" :class="cellStatusClass(cell)">{{ cellStatusIcon(cell) }}</span>
+                  <span class="nge-cell-id" @click="handleJumpToCell(cell.segId)">
+                    {{ cell.nickname || truncateId(cell.segId) }}
+                  </span>
+                  <span class="nge-cell-type" v-if="cell.cellType" @click="handleJumpToCell(cell.segId)">{{ cell.cellType }}</span>
+                  <span class="nge-cell-time" @click="handleJumpToCell(cell.segId)">{{ relativeTime(cell.updatedAt) }}</span>
+                  <button
+                    v-if="!cell.serverOnly"
+                    class="nge-cell-rename"
+                    @click.stop="promptNickname(cell.segId)"
+                    title="Rename this cell"
+                  >✎</button>
+                </div>
+              </div>
+            </div>
+            <div class="nge-cell-empty" v-else>
+No cells completed yet. <template v-if="!viewingOtherUser">Your recently completed cells will show here.</template>
+            </div>
+
             <template v-if="!viewingOtherUser">
             <!-- Scout Report: tags placed and fixed -->
             <div class="nge-profile-section-label">▌ Scout Report</div>
@@ -1646,48 +1688,21 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             </template>
 
             <!-- Cell history list -->
-            <div class="nge-cell-list" v-if="recentCells.length > 0">
-              <div class="nge-cell-list-header">
-                <span class="nge-cell-list-title">{{ viewingOtherUser ? 'Recently completed cells' : 'My recently completed cells' }}</span>
-                <span v-if="activeDatasetCanon" class="nge-cell-list-dataset" :title="'Filtered to ' + scopeLabel">{{ scopeDataset?.shortLabel || activeDatasetCanon }}</span>
-                <button class="nge-cell-list-all" @click="activeTab = 'myCells'" title="Every cell, by dataset">{{ viewingOtherUser ? 'All cells' : 'My cells' }} →</button>
+          </div>
+
+          <!-- Building Pyr: how much has been built, from GitHub. Only on
+               the profile of the person building it (Ames 2026-10-10). -->
+          <div v-if="showsBuilding && repoStats" class="nge-profile-section nge-profile-section--building">
+            <div class="nge-profile-section-label">▌ Building Pyr</div>
+            <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
+              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Changes saved to Pyr's code">
+                <div class="nge-profile-stat-label">Commits</div>
+                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.commits" /></div>
               </div>
-              <div class="nge-cell-list-columns">
-                <span class="nge-cell-col-label nge-cell-col-label--id">Segment</span>
-                <span class="nge-cell-col-label nge-cell-col-label--type">Type</span>
-                <span class="nge-cell-col-label nge-cell-col-label--time">When</span>
+              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Times a new version of Pyr has gone live">
+                <div class="nge-profile-stat-label">Deploys</div>
+                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.deploys" /></div>
               </div>
-              <div class="nge-cell-list-scroll">
-                <div
-                  v-for="cell in recentCells.slice(0, 50)"
-                  :key="cell.segId"
-                  class="nge-cell-row"
-                  :title="cell.nickname ? `${cell.nickname} (${cell.segId})` : `Jump to ${cell.segId}`"
-                >
-                  <button
-                    v-if="!cell.serverOnly"
-                    class="nge-cell-fav"
-                    :class="{ 'nge-cell-fav--active': cell.isFavorite }"
-                    @click.stop="historyStore.toggleFavorite(cell.segId)"
-                    title="Toggle favorite"
-                  >{{ cell.isFavorite ? '★' : '☆' }}</button>
-                  <span class="nge-cell-pip" :class="cellStatusClass(cell)">{{ cellStatusIcon(cell) }}</span>
-                  <span class="nge-cell-id" @click="handleJumpToCell(cell.segId)">
-                    {{ cell.nickname || truncateId(cell.segId) }}
-                  </span>
-                  <span class="nge-cell-type" v-if="cell.cellType" @click="handleJumpToCell(cell.segId)">{{ cell.cellType }}</span>
-                  <span class="nge-cell-time" @click="handleJumpToCell(cell.segId)">{{ relativeTime(cell.updatedAt) }}</span>
-                  <button
-                    v-if="!cell.serverOnly"
-                    class="nge-cell-rename"
-                    @click.stop="promptNickname(cell.segId)"
-                    title="Rename this cell"
-                  >✎</button>
-                </div>
-              </div>
-            </div>
-            <div class="nge-cell-empty" v-else>
-              <template v-if="activeDatasetCanon">No cells completed on {{ scopeDataset?.shortLabel || activeDatasetCanon }} yet. </template><template v-if="!viewingOtherUser">Your recently completed cells will show here.</template>
             </div>
           </div>
 
@@ -1730,9 +1745,6 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               </div>
             </div>
 
-            <!-- the stats at the left are this dataset's; the Achievements and
-                 the counts in the heads are a career -->
-            <div v-if="activeDatasetCanon" class="nge-profile-career-note nge-profile-career-note--foot">The counts beside the Achievements are for every dataset.</div>
           </div>
         </div><!-- end main area -->
 
@@ -4614,40 +4626,78 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
   padding: 16px 0 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
-/* ── The row's head: the label, a circuit trace, the count ───────────────
-   Instead of a second header on the right, one line across the row, in the
-   language of the layer tabs: a 1.4px trace that draws out from the label,
-   lit as far as the count has come toward the next tier, ending on a pad
-   beside the count (Ames 2026-10-11). */
-@property --nge-track-run { syntax: '<number>'; inherits: false; initial-value: 1; }
+/* ── The row's head ────────────────────────────────────────────────────────
+   The label, a 1.4px circuit trace drawn out to a pad at the end of the
+   left half, a gap, a second pad at the start of the right half, and from
+   it the bar toward the next Achievement, lit as far as the count has come,
+   with how many to go at its end (Ames 2026-10-11). The two halves are the
+   row's own two columns, so the break sits where the Achievements begin.
+   The language of the layer tabs, where a trace breaks at a component. */
+@property --nge-track-run  { syntax: '<number>'; inherits: false; initial-value: 1; }
+@property --nge-track-fill { syntax: '<number>'; inherits: false; initial-value: 1; }
 .nge-track-head {
   grid-column: 1 / -1;
-  display: flex; align-items: center; gap: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 22px;
   margin-bottom: 12px;
 }
+.nge-track-head-left, .nge-track-head-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .nge-track-head .nge-profile-section-label { margin-bottom: 0; white-space: nowrap; color: var(--track); }
-.nge-track-line {
-  flex: 1 1 0; min-width: 40px; height: 9px;
+.nge-track-wire, .nge-track-bar { flex: 1 1 0; min-width: 24px; height: 9px; --pad: color-mix(in srgb, var(--track) 70%, transparent); }
+.nge-track-wire {
   --nge-track-run: 1;
-  --pad: color-mix(in srgb, var(--track) 70%, transparent);
   background:
     radial-gradient(circle at calc(100% - 4px) 50%, #0a1223 0 0.9px, var(--pad) 1.3px 2.1px, transparent 2.5px),
-    linear-gradient(var(--track), var(--track)) left 50% / calc((100% - 10px) * var(--frac, 1) * var(--nge-track-run)) 1.4px no-repeat,
-    linear-gradient(rgba(201, 228, 255, 0.14), rgba(201, 228, 255, 0.14)) left 50% / calc(100% - 10px) 1.4px no-repeat;
-  animation: ngeTrackRun 720ms cubic-bezier(0.3, 0, 0.2, 1) 1 both;
+    linear-gradient(var(--track), var(--track)) left 50% / calc((100% - 10px) * var(--nge-track-run)) 1.4px no-repeat;
+  animation: ngeTrackRun 480ms cubic-bezier(0.3, 0, 0.2, 1) 1 both;
 }
-.nge-track-row--edits .nge-track-line { animation-delay: 120ms; }
-.nge-track-row--days .nge-track-line { animation-delay: 240ms; }
-@keyframes ngeTrackRun { 0% { --nge-track-run: 0; } 100% { --nge-track-run: 1; } }
-@media (prefers-reduced-motion: reduce) { .nge-track-line { animation: none; } }
+.nge-track-bar {
+  --nge-track-fill: 1;
+  cursor: help;
+  background:
+    radial-gradient(circle at 4px 50%, #0a1223 0 0.9px, var(--pad) 1.3px 2.1px, transparent 2.5px),
+    linear-gradient(var(--track), var(--track)) 10px 50% / calc((100% - 10px) * var(--frac, 1) * var(--nge-track-fill)) 1.4px no-repeat,
+    linear-gradient(rgba(201, 228, 255, 0.14), rgba(201, 228, 255, 0.14)) 10px 50% / calc(100% - 10px) 1.4px no-repeat;
+  animation: ngeTrackFill 560ms cubic-bezier(0.3, 0, 0.2, 1) 1 both;
+  animation-delay: 420ms;
+}
+.nge-track-row--edits .nge-track-wire { animation-delay: 120ms; }
+.nge-track-row--edits .nge-track-bar  { animation-delay: 540ms; }
+.nge-track-row--days  .nge-track-wire { animation-delay: 240ms; }
+.nge-track-row--days  .nge-track-bar  { animation-delay: 660ms; }
+@keyframes ngeTrackRun  { 0% { --nge-track-run: 0; }  100% { --nge-track-run: 1; } }
+@keyframes ngeTrackFill { 0% { --nge-track-fill: 0; } 100% { --nge-track-fill: 1; } }
+@media (prefers-reduced-motion: reduce) { .nge-track-wire, .nge-track-bar { animation: none; } }
 .nge-track-count {
   font-family: ui-monospace, 'Cascadia Code', monospace;
   font-variant-numeric: tabular-nums;
-  font-weight: 700; font-size: 1.05em; white-space: nowrap;
+  font-weight: 700; font-size: 1.02em; white-space: nowrap;
   color: var(--track);
   cursor: help;
 }
-.nge-track-count-next { font-weight: 600; opacity: 0.6; }
+body.nge-mobile .nge-track-head { grid-template-columns: minmax(0, 1fr); gap: 6px 0; }
+
+/* the Achievements sit in the middle of their row's height */
+.nge-track-achievements { display: flex; flex-direction: column; justify-content: center; }
+
+/* ── Short screens (laptops): smaller rows so the list under them is in
+   reach without much scrolling. The curves draw at 56px (a prop). ── */
+.is-compact .nge-track-row { padding: 8px 0 10px; }
+.is-compact .nge-track-head { margin-bottom: 6px; }
+.is-compact .nge-profile-header { padding-bottom: 4px; margin-bottom: 0; }
+.is-compact .nge-profile-name { font-size: 1.25em; }
+.is-compact .nge-profile-bio { margin-top: 0; }
+.is-compact .nge-cell-list { margin-top: 10px; }
+.is-compact .nge-track-row--cells .nge-profile-feature, .is-compact .nge-track-row--edits .nge-profile-feature { width: 96px; }
+.is-compact .nge-track-row--cells .nge-profile-feature-icon, .is-compact .nge-track-row--edits .nge-profile-feature-icon { width: 72px; height: 72px; }
+.is-compact .nge-profile-feature-icon { width: 56px; height: 56px; }
+.is-compact .nge-track-row--cells .nge-profile-feature-icon, .is-compact .nge-track-row--edits .nge-profile-feature-icon { width: 72px; height: 72px; }
+.is-compact .nge-profile-stat-val { font-size: 1.08em; }
+.is-compact .nge-profile-stat-val--hero { font-size: 1.35em; }
+.is-compact .nge-track-achievements .nge-profile-badges-grid { grid-auto-rows: 48px; }
+.is-compact .nge-profile-header { padding-bottom: 12px; }
+.is-compact .nge-profile-windows { gap: 6px; }
 .nge-profile-career-note--foot { margin: 10px 0 0; }
 .nge-track-row:last-child { border-bottom: none; }
 .nge-track-stats, .nge-track-achievements { min-width: 0; }

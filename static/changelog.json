@@ -6,13 +6,14 @@
       "title": "The profile fills the window",
       "items": [
         "Your profile now fills the whole window, with more room for everything in it.",
-        "Cells completed now shows today, the past 7 days and all time for the dataset you are on, the same three windows as edits.",
-        "Above each, a small curve draws your running total from your first day to today, with the past 7 days and today marked on it. Point at it to read any day.",
-        "Each of cells, edits and days is one row: the latest Achievement you earned, your numbers and curve, and the rest of that track's Achievements beside them. A line draws across the top of each row, lit as far as you have come toward your next Achievement, ending at your count. Achievement names show when you point at them.",
+        "Your profile counts your work in Pyr on all of its datasets, not only the dataset on screen. Only work done in Pyr counts.",
+        "Cells completed shows today, the past 7 days and all time, the same three windows as edits, and above each a small curve draws your running total from your first day to today. Point at it to read any day.",
+        "Each of cells, edits and days is one row: the latest Achievement you earned, your numbers and curve, and the rest of that track's Achievements beside them. A line runs across the top of each row, breaks at two pads, and from the second one fills toward your next Achievement, with how many to go at its end. Achievement names show when you point at them.",
         "Days helping science in Pyr shows your latest Days Achievement beside your total. Your streak stays on the right.",
-        "Your recently completed cells are listed on this dataset even on a new device.",
+        "Your recently completed cells are listed even on a new device.",
         "If you have a username, your profile is titled with it.",
-        "Cells, edits and days each have their own colour on the profile, the same as their Achievement sections: sky blue, gold and purple. The Last 14 Days chart uses the same two."
+        "Cells, edits and days each have their own colour on the profile, the same as their Achievement sections: sky blue, gold and purple. The Last 14 Days chart uses the same two.",
+        "On a laptop screen the rows draw smaller so the list under them is in reach."
       ]
     },
     {
