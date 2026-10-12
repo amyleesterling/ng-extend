@@ -4624,7 +4624,9 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
    the old middle column: the hairline and the faint tint. */
 .nge-track-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* the stats take the larger share: three windows with merge/split
+     breakdowns need the room, the tile grid is capped at 440 px */
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   gap: 0 22px;
   padding: 16px 0 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -4696,9 +4698,42 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
 .nge-profile-stat-col--all .nge-profile-stat-val,
 .nge-track-row--days .nge-profile-stat-val--hero {
   font-family: 'Orbitron', 'Rajdhani', ui-monospace, 'Cascadia Code', monospace;
-  font-size: 1.6em; font-weight: 700; letter-spacing: 0.02em;
+  font-size: 1.6em; font-weight: 700; letter-spacing: 0.02em; line-height: 1.15;
   color: var(--track);
   text-shadow: 0 0 16px color-mix(in srgb, var(--track) 35%, transparent);
+}
+
+/* ── The three windows share their lines (Ames 2026-10-12: "all time is out
+   of alignment with the other stats") ──────────────────────────────────────
+   One grid for the nine cells, not three stacked columns: the labels on one
+   line, the three numbers on ONE BASELINE whatever their face and size, and
+   the merge/split breakdowns on one line under them. The columns are sized
+   to their content, so the bigger All time number takes what it needs and
+   the row never runs past its box into the Achievements (Ames: "edit badges
+   are very close to the edge of the graph"); a breakdown short of room for
+   one line wraps to two instead. */
+.nge-profile-windows .nge-profile-stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(min-content, 1fr));
+  gap: 0 16px;  /* the flex rule's gap would open 16 px between the lines */
+  align-items: baseline;
+}
+.nge-profile-windows .nge-profile-stat-col { display: contents; }
+.nge-profile-windows .nge-profile-stat-col:nth-child(1) > * { grid-column: 1; }
+.nge-profile-windows .nge-profile-stat-col:nth-child(2) > * { grid-column: 2; }
+.nge-profile-windows .nge-profile-stat-col:nth-child(3) > * { grid-column: 3; }
+.nge-profile-windows .nge-profile-stat-label { grid-row: 1; }
+.nge-profile-windows .nge-profile-stat-val { grid-row: 2; }
+.nge-profile-windows .nge-profile-stat-breakdown { grid-row: 3; flex-wrap: wrap; row-gap: 2px; min-width: 0; }
+/* the laptop tiers keep the breakdowns to one line a little longer, and
+   where the windows are too narrow for that (a 1366 px laptop) all three
+   stack as two lines together, not whichever happens to run out of room */
+.is-compact .nge-profile-windows .nge-profile-stat-bp { font-size: 0.84em; gap: 3px; }
+.is-compact .nge-profile-windows .nge-profile-stat-icon { width: 16px; height: 16px; }
+.is-compact .nge-profile-windows .nge-profile-stat-breakdown { column-gap: 8px; }
+.nge-profile-windows { container-type: inline-size; }
+@container (max-width: 360px) {
+  .nge-profile-stat-breakdown { flex-direction: column; align-items: flex-start; row-gap: 1px; }
 }
 .is-compact .nge-profile-stat-col--all .nge-profile-stat-val,
 .is-compact .nge-track-row--days .nge-profile-stat-val--hero { font-size: 1.4em; }
