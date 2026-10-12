@@ -4730,14 +4730,15 @@ body:not(.nge-mobile) .nge-track-row--rest .nge-cell-list-scroll { flex: 1 1 0; 
 .nge-profile-header-side .nge-profile-badges-grid { display: flex; gap: 8px; grid-auto-rows: auto; background: none; padding: 0; }
 .nge-profile-header-side .nge-profile-badge { padding: 0; }
 .nge-profile-header-side .nge-profile-stat-row--tiles { flex-wrap: nowrap; }
-.nge-profile-header-side .nge-profile-stat-tile { padding: 3px 10px; min-width: 120px; }
+/* room inside the tiles: the number sat on the box edge (Ames 2026-10-11) */
+.nge-profile-header-side .nge-profile-stat-tile { padding: 4px 16px; min-width: 140px; gap: 14px; }
 
 /* ── Short screens (laptops): smaller rows so the list under them is in
    reach without much scrolling. The curves draw at 56px (a prop). ── */
 .is-compact .nge-track-row { padding: 6px 0 8px; }
 .is-compact .nge-track-head { margin-bottom: 4px; }
 .is-compact .nge-profile-header { padding-bottom: 2px; margin-bottom: 0; }
-.is-compact .nge-profile-header-side .nge-profile-stat-tile { padding: 1px 8px; min-width: 104px; }
+.is-compact .nge-profile-header-side .nge-profile-stat-tile { padding: 2px 12px; min-width: 120px; }
 .is-compact .nge-profile-stat-label { margin-bottom: 2px; }
 .is-compact .nge-profile-stat-breakdown { margin-top: 3px; }
 /* in the compact tiers the curve stays above the numbers and shrinks (36 px,
@@ -4749,7 +4750,7 @@ body:not(.nge-mobile) .nge-track-row--rest .nge-cell-list-scroll { flex: 1 1 0; 
    as tall as the name and bio and never wraps under them */
 .is-compact .nge-profile-header-main { flex: 0 1 auto; max-width: 40%; }
 .is-compact .nge-profile-header-side { flex: 1 1 auto; flex-direction: column; align-items: flex-end; gap: 4px; padding-top: 0; }
-.is-compact .nge-profile-header-side .nge-profile-stat-tile { min-width: 96px; }
+.is-compact .nge-profile-header-side .nge-profile-stat-tile { min-width: 112px; }
 .is-compact .nge-track-row { padding: 4px 0 6px; }
 .is-compact .nge-track-head { margin-bottom: 3px; }
 .is-compact .nge-track-row--days .nge-profile-stat-val--hero { font-size: 1.25em; }
