@@ -3,9 +3,10 @@
   "entries": [
     {
       "at": "2026-10-12T13:25:00Z",
-      "title": "The profile's numbers line up",
-      "digest": "minor",
+      "title": "Your profile: a range for the curves, and cells identified",
       "items": [
+        "Choose the range of the two curves on your profile: all time, 90, 30 or 7 days. At 7 days a curve ends on the Past 7d number under it. The choice is remembered.",
+        "The Scout report counts the cells you identified: cells whose type you set in Pyr, each once. Unknown or Unsure does not count, and neither does the Sandbox.",
         "In your profile, Today, Past 7d and All time now sit on one line, and the merge and split counts under them on one line too.",
         "The Cells completed and Edits blocks take more of their row, so a long count never runs under your Achievements.",
         "On a laptop screen the merge and split counts stack in two short lines when the row is short of room."

@@ -875,6 +875,69 @@ const scopedCellDays = ref<EffortDay[] | null>(null);
 /** The matched completion rows, newest first, for the recent cells list. */
 const scopedCompletionRows = ref<Array<{ cell: string; done_at: string; dataset: string }> | null>(null);
 const scopedCellsFailed = ref(false);
+
+// The curves' range: one choice for both curves (Ames 2026-10-12: "a way for
+// me to set the date range"), kept in this browser. 0 is the whole record.
+const CURVE_SPANS = [0, 90, 30, 7];
+const CURVE_SPAN_KEY = 'nge-profile-curve-span';
+function loadCurveSpan(): number {
+  try { const v = Number(localStorage.getItem(CURVE_SPAN_KEY)); return CURVE_SPANS.includes(v) ? v : 0; } catch { return 0; }
+}
+const curveSpan = ref<number>(loadCurveSpan());
+function setCurveSpan(days: number) {
+  curveSpan.value = days;
+  try { localStorage.setItem(CURVE_SPAN_KEY, String(days)); } catch { /* private mode */ }
+}
+
+// Cells identified: the cells whose type this player set in Pyr (the game's
+// own log, 'set_cell_type' rows stamped by the server), on its real
+// datasets; the Sandbox does not count. A cell counts once, by the type it
+// was given last; Unknown or Unsure does not count. Open text types count
+// for now. (Ames's rules for the planned Identification track, 2026-10-07;
+// the count on the profile, 2026-10-12.) Not annotation points.
+const scopedIdentified = ref<number | null>(null);
+const scopedIdentifiedFailed = ref(false);
+let scopedIdentifiedReq = 0;
+const SANDBOX_CANON = new Set(DATASETS.filter(d => d.section === 'sandbox').map(d => canonicalDataset(d.id)));
+const NOT_A_TYPE = /^\s*$|unknown|unsure|not sure|unclear/i;
+async function loadScopedIdentifications() {
+  const uid = viewingOtherUser.value ? props.viewUserId : backendStore.userId;
+  const req = ++scopedIdentifiedReq;
+  scopedIdentifiedFailed.value = false;
+  if (!uid) { scopedIdentified.value = null; return; }
+  try {
+    const { supabase } = await import('../supabase');
+    const rows: Array<{ segment_after: string | null; dataset: string | null; success: boolean | null; metadata: any }> = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase.from('edit_log')
+        .select('segment_after, dataset, success, metadata')
+        .eq('user_id', uid).eq('operation', 'set_cell_type')
+        .order('id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      rows.push(...(data ?? []));
+      if (!data || data.length < PAGE) break;
+    }
+    if (req !== scopedIdentifiedReq) return;
+    const latest = new Map<string, string>();  // oldest first, so the last word on a cell wins
+    for (const r of rows) {
+      if (r.success === false) continue;
+      if (SANDBOX_CANON.has(canonicalDataset(r.dataset))) continue;
+      const cell = String(r.metadata?.root_id ?? r.segment_after ?? '');
+      if (!cell) continue;
+      latest.set(cell, String(r.metadata?.cell_type ?? ''));
+    }
+    let n = 0;
+    for (const t of latest.values()) if (!NOT_A_TYPE.test(t)) n++;
+    scopedIdentified.value = n;
+  } catch (e) {
+    if (req !== scopedIdentifiedReq) return;
+    console.warn('[profile] cells identified unavailable', e);
+    scopedIdentified.value = null;
+    scopedIdentifiedFailed.value = true;
+  }
+}
 let scopedCellsReq = 0;
 /** Zeros while loading, never another dataset's numbers. */
 const overviewCells = computed(() => scopedCells.value ?? { today: 0, week: 0, all: 0 });
@@ -1011,9 +1074,10 @@ async function loadScopedCompletions() {
 
 loadScopedEdits();
 loadScopedCompletions();
-watch(() => backendStore.userId, () => { loadScopedEdits(); loadScopedCompletions(); });
+loadScopedIdentifications();
+watch(() => backendStore.userId, () => { loadScopedEdits(); loadScopedCompletions(); loadScopedIdentifications(); });
 // Re-scope when coming back to Overview (the Datasets tab can switch datasets).
-watch(activeTab, tab => { if (tab === 'overview') { loadScopedEdits(); loadScopedCompletions(); } });
+watch(activeTab, tab => { if (tab === 'overview') { loadScopedEdits(); loadScopedCompletions(); loadScopedIdentifications(); } });
 
 /** Edits section numbers: this dataset's, or career-wide if edit_log failed. */
 const overviewEdits = computed(() => {
@@ -1375,7 +1439,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 <img :src="getBadgeUrl(latestExplorationBadge.imageKey)" :alt="latestExplorationBadge.name" class="nge-profile-feature-icon" :class="`nge-badge--${latestExplorationBadge.slug}`" />
               </div>
             <div class="nge-profile-windows">
-              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="144 255 242" unit="cells" :height="tinyRows ? 26 : compactRows ? 36 : 76" />
+              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="144 255 242" unit="cells" :span="curveSpan" :spans="CURVE_SPANS" @update:span="setCurveSpan" :height="tinyRows ? 26 : compactRows ? 36 : 76" />
               <div class="nge-profile-stat-row">
                 <div class="nge-profile-stat-col" :class="{ 'nge-profile-stat-col--all': i === 2 }" v-for="(col, i) in [
                   {label:'Today',    val:overviewCells.today},
@@ -1475,7 +1539,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             <!-- The same rows as the three numbers, as a line from the first
                  day to today (Ames 2026-10-11). Nothing while they load, and
                  nothing for the career fallback, which has no days. -->
-            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="255 208 138" unit="edits" :height="tinyRows ? 26 : compactRows ? 36 : 76" />
+            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="255 208 138" unit="edits" :span="curveSpan" :spans="CURVE_SPANS" @update:span="setCurveSpan" :height="tinyRows ? 26 : compactRows ? 36 : 76" />
             <div class="nge-profile-stat-row">
               <div class="nge-profile-stat-col" :class="{ 'nge-profile-stat-col--all': i === 2 }" v-for="(col, i) in [
                 {label:'Today',    val:overviewEdits.today.edits, merges:overviewEdits.today.merges, splits:overviewEdits.today.splits},
@@ -1733,14 +1797,26 @@ No cells completed yet. <template v-if="!viewingOtherUser">Your recently complet
                 <div class="nge-profile-stat-label">Annotations</div>
                 <div class="nge-profile-stat-val" style="color: #c9a0ff; text-shadow: 0 0 14px rgba(201, 160, 255, 0.35);"><RollUp :value="annotationsPlaced" /></div>
               </div>
+              <!-- Cells identified: cells whose type you set, each once. Not
+                   annotation points (Ames 2026-10-12). -->
+              <div class="nge-profile-stat-col" title="Cells whose type you set in Pyr, on its real datasets (the Sandbox does not count). A cell counts once, by the type you gave it last; Unknown or Unsure does not count.">
+                <div class="nge-profile-stat-label">Cells identified</div>
+                <div v-if="scopedIdentifiedFailed" class="nge-profile-stat-val nge-profile-stat-val--na" title="Not available right now">n/a</div>
+                <div v-else class="nge-profile-stat-val"><RollUp :value="scopedIdentified ?? 0" /></div>
+              </div>
             </div>
             </template>
             <template v-else>
-            <div class="nge-profile-section-label">▌ Annotations</div>
-            <div class="nge-profile-stat-row" style="margin-bottom: 12px;">
+            <div class="nge-profile-section-label">▌ Annotations and cells identified</div>
+            <div class="nge-profile-stat-row nge-profile-stat-row--scout" style="margin-bottom: 12px;">
               <div class="nge-profile-stat-col" title="Points, lines and boxes this player has placed in annotation layers, on every dataset">
-                <div class="nge-profile-stat-label">All Time</div>
+                <div class="nge-profile-stat-label">Annotations</div>
                 <div class="nge-profile-stat-val" style="color: #c9a0ff; text-shadow: 0 0 14px rgba(201, 160, 255, 0.35);"><RollUp :value="annotationsPlaced" /></div>
+              </div>
+              <div class="nge-profile-stat-col" title="Cells whose type this player set in Pyr, on its real datasets (the Sandbox does not count). A cell counts once, by its latest type; Unknown or Unsure does not count.">
+                <div class="nge-profile-stat-label">Cells identified</div>
+                <div v-if="scopedIdentifiedFailed" class="nge-profile-stat-val nge-profile-stat-val--na" title="Not available right now">n/a</div>
+                <div v-else class="nge-profile-stat-val"><RollUp :value="scopedIdentified ?? 0" /></div>
               </div>
             </div>
             </template>
@@ -4797,7 +4873,9 @@ body:not(.nge-mobile) .nge-track-row--rest .nge-cell-list-scroll { flex: 1 1 0; 
 .is-compact .nge-profile-stat-breakdown { margin-top: 2px; }
 .is-tiny .nge-track-row { padding: 3px 0 5px; }
 /* the curve's caption goes on laptops; hovering the curve still reads any day */
-.is-compact :deep(.nge-effort-cap) { display: none; }
+.is-compact :deep(.nge-effort-cap-start), .is-compact :deep(.nge-effort-cap-end) { display: none; }
+.is-compact :deep(.nge-effort-cap) { margin-top: 1px; }
+.nge-profile-stat-val--na { color: rgba(200, 215, 240, 0.4); font-size: 0.9em; }
 /* on a small laptop the merge and split breakdown goes too; the tooltip keeps it */
 .is-tiny .nge-profile-stat-breakdown { display: none; }
 /* the Scout report's five numbers wrap in the last row's narrow right half */
