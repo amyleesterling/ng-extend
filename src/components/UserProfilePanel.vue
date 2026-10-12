@@ -1391,18 +1391,17 @@ const emit = defineEmits({hide: null, 'open-settings': null});
               </div>
             </div>
           </template>
-          <!-- Building Pyr: how much has been built, from GitHub. Only on
-               the profile of the person building it (Ames 2026-10-10). -->
-          <div v-if="showsBuilding && repoStats" class="nge-profile-section nge-profile-section--building">
-            <div class="nge-profile-section-label">▌ Building Pyr</div>
+          <!-- Cells identified: cells whose type this player set, each once.
+               Beside the name until the Identification track has a row of
+               its own (Ames 2026-10-12: "put cells identified where Building
+               Pyr is; eventually it will be a new row"). -->
+          <div class="nge-profile-section nge-profile-section--identified">
+            <div class="nge-profile-section-label">▌ Cells identified</div>
             <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
-              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Changes saved to Pyr's code">
-                <div class="nge-profile-stat-label">Commits</div>
-                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.commits" /></div>
-              </div>
-              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Times a new version of Pyr has gone live">
-                <div class="nge-profile-stat-label">Deploys</div>
-                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.deploys" /></div>
+              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--identified" :title="(viewingOtherUser ? 'Cells whose type this player set' : 'Cells whose type you set') + ' in Pyr, on its real datasets (the Sandbox does not count). A cell counts once, by its latest type; Unknown or Unsure does not count. Not annotation points.'">
+                <div class="nge-profile-stat-label">All time</div>
+                <div v-if="scopedIdentifiedFailed" class="nge-profile-stat-val nge-profile-stat-val--na" title="Not available right now">n/a</div>
+                <div v-else class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="scopedIdentified ?? 0" /></div>
               </div>
             </div>
           </div>
@@ -1797,29 +1796,34 @@ No cells completed yet. <template v-if="!viewingOtherUser">Your recently complet
                 <div class="nge-profile-stat-label">Annotations</div>
                 <div class="nge-profile-stat-val" style="color: #c9a0ff; text-shadow: 0 0 14px rgba(201, 160, 255, 0.35);"><RollUp :value="annotationsPlaced" /></div>
               </div>
-              <!-- Cells identified: cells whose type you set, each once. Not
-                   annotation points (Ames 2026-10-12). -->
-              <div class="nge-profile-stat-col" title="Cells whose type you set in Pyr, on its real datasets (the Sandbox does not count). A cell counts once, by the type you gave it last; Unknown or Unsure does not count.">
-                <div class="nge-profile-stat-label">Cells identified</div>
-                <div v-if="scopedIdentifiedFailed" class="nge-profile-stat-val nge-profile-stat-val--na" title="Not available right now">n/a</div>
-                <div v-else class="nge-profile-stat-val"><RollUp :value="scopedIdentified ?? 0" /></div>
-              </div>
             </div>
             </template>
             <template v-else>
-            <div class="nge-profile-section-label">▌ Annotations and cells identified</div>
-            <div class="nge-profile-stat-row nge-profile-stat-row--scout" style="margin-bottom: 12px;">
+            <div class="nge-profile-section-label">▌ Annotations</div>
+            <div class="nge-profile-stat-row" style="margin-bottom: 12px;">
               <div class="nge-profile-stat-col" title="Points, lines and boxes this player has placed in annotation layers, on every dataset">
-                <div class="nge-profile-stat-label">Annotations</div>
+                <div class="nge-profile-stat-label">All Time</div>
                 <div class="nge-profile-stat-val" style="color: #c9a0ff; text-shadow: 0 0 14px rgba(201, 160, 255, 0.35);"><RollUp :value="annotationsPlaced" /></div>
-              </div>
-              <div class="nge-profile-stat-col" title="Cells whose type this player set in Pyr, on its real datasets (the Sandbox does not count). A cell counts once, by its latest type; Unknown or Unsure does not count.">
-                <div class="nge-profile-stat-label">Cells identified</div>
-                <div v-if="scopedIdentifiedFailed" class="nge-profile-stat-val nge-profile-stat-val--na" title="Not available right now">n/a</div>
-                <div v-else class="nge-profile-stat-val"><RollUp :value="scopedIdentified ?? 0" /></div>
               </div>
             </div>
             </template>
+          </div>
+          <!-- Building Pyr: how much has been built, from GitHub. Only on
+               the profile of the person building it (Ames 2026-10-10). Under
+               the Scout report since the count of cells identified took its
+               place beside the name (Ames 2026-10-12). -->
+          <div v-if="showsBuilding && repoStats" class="nge-profile-section nge-profile-section--building">
+            <div class="nge-profile-section-label">▌ Building Pyr</div>
+            <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
+              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Changes saved to Pyr's code">
+                <div class="nge-profile-stat-label">Commits</div>
+                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.commits" /></div>
+              </div>
+              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Times a new version of Pyr has gone live">
+                <div class="nge-profile-stat-label">Deploys</div>
+                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.deploys" /></div>
+              </div>
+            </div>
           </div>
               </div>
             </div>
@@ -4876,6 +4880,19 @@ body:not(.nge-mobile) .nge-track-row--rest .nge-cell-list-scroll { flex: 1 1 0; 
 .is-compact :deep(.nge-effort-cap-start), .is-compact :deep(.nge-effort-cap-end) { display: none; }
 .is-compact :deep(.nge-effort-cap) { margin-top: 1px; }
 .nge-profile-stat-val--na { color: rgba(200, 215, 240, 0.4); font-size: 0.9em; }
+/* Cells identified beside the name: the tile the Building Pyr numbers used,
+   in the plain number colour until the Identification track has a colour */
+.nge-profile-stat-tile--identified .nge-profile-stat-val { color: #d8dde8; text-shadow: none; }
+.nge-track-achievements--rest .nge-profile-section--building { margin-top: 16px; }
+/* on laptops it is one line, the label and the two numbers side by side
+   with no tiles, so the last row still fits without a scroll */
+.is-compact .nge-track-achievements--rest .nge-profile-section--building { margin-top: 4px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; }
+.is-compact .nge-track-achievements--rest .nge-profile-section--building .nge-profile-section-label { margin: 0; }
+.is-compact .nge-track-achievements--rest .nge-profile-section--building .nge-profile-stat-row--tiles { display: flex; gap: 12px; flex-wrap: nowrap; }
+.is-compact .nge-track-achievements--rest .nge-profile-section--building .nge-profile-stat-tile { flex: none; min-width: 0; padding: 0; gap: 6px; background: none; border: none; box-shadow: none; }
+.is-compact .nge-track-achievements--rest .nge-profile-section--building .nge-profile-stat-val--hero { font-size: 1em; }
+.is-compact .nge-track-achievements--rest .nge-profile-section--building .nge-profile-section-label { font-size: 0.7em; }
+.is-compact .nge-track-achievements--rest .nge-profile-section--building .nge-profile-stat-label { font-size: 0.62em; }
 /* on a small laptop the merge and split breakdown goes too; the tooltip keeps it */
 .is-tiny .nge-profile-stat-breakdown { display: none; }
 /* the Scout report's five numbers wrap in the last row's narrow right half */
