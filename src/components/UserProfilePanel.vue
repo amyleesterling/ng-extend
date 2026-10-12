@@ -549,11 +549,15 @@ const earnedLoyaltyBadges = computed(() => {
 /** Short screens (laptops): the rows draw smaller so the list under them
  *  is reachable (Ames 2026-10-11: "did you leave room for the my cells list
  *  on laptop screens?"). */
-const compactMq = window.matchMedia('(max-height: 840px)');
+const compactMq = window.matchMedia('(max-height: 960px)');
+const tinyMq = window.matchMedia('(max-height: 760px)');
 const compactRows = ref(compactMq.matches);
+const tinyRows = ref(tinyMq.matches);
 const onCompactChange = (e: MediaQueryListEvent) => { compactRows.value = e.matches; };
+const onTinyChange = (e: MediaQueryListEvent) => { tinyRows.value = e.matches; };
 compactMq.addEventListener('change', onCompactChange);
-onUnmounted(() => compactMq.removeEventListener('change', onCompactChange));
+tinyMq.addEventListener('change', onTinyChange);
+onUnmounted(() => { compactMq.removeEventListener('change', onCompactChange); tinyMq.removeEventListener('change', onTinyChange); });
 
 /** The latest Achievement of each track, featured beside that track's
  *  numbers in the left column (Ames 2026-10-11). Each list is newest first. */
@@ -1228,10 +1232,11 @@ const emit = defineEmits({hide: null, 'open-settings': null});
              track, so the rows line up across: a track's stats and curve beside
              its Achievements (Ames 2026-10-11, "make sure the rows are aligned,
              like across cells, edits, loyalty"). The last row holds the rest. -->
-        <div class="nge-profile-col nge-profile-col--left nge-profile-col--main" :class="{ 'is-compact': compactRows }">
+        <div class="nge-profile-col nge-profile-col--left nge-profile-col--main" :class="{ 'is-compact': compactRows, 'is-tiny': tinyRows }">
 
           <!-- Header -->
           <div class="nge-profile-header" v-if="sessions.length > 0 || viewingOtherUser">
+            <div class="nge-profile-header-main">
             <div class="nge-profile-name-row">
 
               <!-- Flag (editable only for own profile) -->
@@ -1284,6 +1289,60 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 + Add a bio
               </button>
             </template>
+            </div>
+            <!-- Special Awards and, for the builder, Building Pyr sit beside the
+                 name (Ames 2026-10-11: "special awards are too far down", "move
+                 building Pyr to the top row"). -->
+            <div class="nge-profile-header-side">
+          <!-- Special Awards (admin-awarded badges) -->
+          <template v-if="profileSpecialBadges.length > 0">
+            <div class="nge-profile-section nge-profile-section--badges nge-profile-section--special">
+              <div class="nge-profile-section-label">★ Special Awards</div>
+              <div class="nge-profile-badges-grid">
+                <div
+                  v-for="award in displayedSpecialBadges"
+                  :key="award.id"
+                  class="nge-profile-badge"
+                  :class="{ 'nge-profile-badge--selected': selectedSpecialBadge?.id === award.id }"
+                  :title="specialBadgeTooltip(award)"
+                  @click="onSpecialBadgeClick(award)"
+                >
+                  <div class="nge-profile-badge-img">
+                    <img :src="award.badge?.thumbnail_url || award.badge?.image_url" :alt="award.badge?.name" class="nge-profile-badge-icon" />
+                  </div>
+                  <div class="nge-profile-badge-name">{{ award.badge?.name || 'Award' }}</div>
+                </div>
+                <!-- View All tile when overflow -->
+                <div
+                  v-if="showSpecialViewAll"
+                  class="nge-profile-badge nge-profile-badge--viewall"
+                  title="View all special awards"
+                  @click="showAllSpecialModal = true"
+                >
+                  <div class="nge-profile-badge-img">
+                    <svg class="nge-profile-badge-viewall-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div>
+                  <div class="nge-profile-badge-name">View all</div>
+                </div>
+              </div>
+            </div>
+          </template>
+          <!-- Building Pyr: how much has been built, from GitHub. Only on
+               the profile of the person building it (Ames 2026-10-10). -->
+          <div v-if="showsBuilding && repoStats" class="nge-profile-section nge-profile-section--building">
+            <div class="nge-profile-section-label">▌ Building Pyr</div>
+            <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
+              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Changes saved to Pyr's code">
+                <div class="nge-profile-stat-label">Commits</div>
+                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.commits" /></div>
+              </div>
+              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Times a new version of Pyr has gone live">
+                <div class="nge-profile-stat-label">Deploys</div>
+                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.deploys" /></div>
+              </div>
+            </div>
+          </div>
+            </div>
           </div>
 
 
@@ -1291,19 +1350,17 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
             <div class="nge-track-row nge-track-row--cells">
               <!-- One head for the row (Ames 2026-10-11): the label, a circuit
-                   trace drawn out to a pad, a gap, a second pad, and from it the
-                   bar toward the next Achievement, lit as far as you have come,
-                   with how many to go at its end. The language of the layer
-                   tabs, where a trace breaks at a component. -->
-              <div class="nge-track-head" :style="{ '--track': '#90fff2', '--frac': (nextExplorationAchievement) ? (nextExplorationAchievement).pct / 100 : 1 }">
-                <div class="nge-track-head-left">
-                  <div class="nge-profile-section-label" title="Cells proofread all the way to completion in Pyr, on any of its datasets; a cell completed again after an edit counts once. Cells marked in other tools are not counted. At the right, your Cell Completion Achievements.">▌ Cells completed</div>
-                  <div class="nge-track-wire" aria-hidden="true"></div>
-                </div>
-                <div class="nge-track-head-right">
-                  <div class="nge-track-bar" :title="(nextExplorationAchievement) ? (nextExplorationAchievement).pct + '% of the way to your next Achievement' : 'Every Achievement on this track is yours'"></div>
-                  <div v-if="nextExplorationAchievement" class="nge-track-count" :title="(nextExplorationAchievement).remaining.toLocaleString() + ' more cells to your next Achievement'"><RollUp :value="(nextExplorationAchievement).remaining" /> to go</div>
-                </div>
+                   trace to a pad, a second pad the same small distance away in
+                   every row, and from it the bar toward the next Achievement,
+                   lit as far as the count has come, with how many to go at its
+                   end. The layer tabs' language, where a trace breaks at a
+                   component; the break lands where each label ends. -->
+              <div class="nge-track-head" :style="{ '--frac': (nextExplorationAchievement) ? (nextExplorationAchievement).pct / 100 : 1 }">
+                <div class="nge-profile-section-label" title="Cells proofread all the way to completion in Pyr, on any of its datasets; a cell completed again after an edit counts once. Cells marked in other tools are not counted. At the right, your Cell Completion Achievements.">▌ Cells completed</div>
+                <div class="nge-track-wire" aria-hidden="true"></div>
+                <div class="nge-track-pads" aria-hidden="true"></div>
+                <div class="nge-track-bar" :title="(nextExplorationAchievement) ? (nextExplorationAchievement).pct + '% of the way to your next Achievement' : 'Every Achievement on this track is yours'"></div>
+                <div v-if="nextExplorationAchievement" class="nge-track-count" :title="(nextExplorationAchievement).remaining.toLocaleString() + ' more cells to your next Achievement'"><RollUp :value="(nextExplorationAchievement).remaining" /> to go</div>
               </div>
               <div class="nge-track-stats">
           <!-- Cells completed on this dataset, in the game, by the completed
@@ -1318,9 +1375,9 @@ const emit = defineEmits({hide: null, 'open-settings': null});
                 <img :src="getBadgeUrl(latestExplorationBadge.imageKey)" :alt="latestExplorationBadge.name" class="nge-profile-feature-icon" :class="`nge-badge--${latestExplorationBadge.slug}`" />
               </div>
             <div class="nge-profile-windows">
-              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="144 255 242" unit="cells" :height="compactRows ? 48 : 76" />
+              <EffortCurve v-if="scopedCellDays && scopedCellDays.length" :days="scopedCellDays" color="144 255 242" unit="cells" :height="tinyRows ? 26 : compactRows ? 36 : 76" />
               <div class="nge-profile-stat-row">
-                <div class="nge-profile-stat-col" v-for="(col, i) in [
+                <div class="nge-profile-stat-col" :class="{ 'nge-profile-stat-col--all': i === 2 }" v-for="(col, i) in [
                   {label:'Today',    val:overviewCells.today},
                   {label:'Past 7d',  val:overviewCells.week},
                   {label:'All Time', val:overviewCells.all},
@@ -1391,19 +1448,17 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
             <div class="nge-track-row nge-track-row--edits">
               <!-- One head for the row (Ames 2026-10-11): the label, a circuit
-                   trace drawn out to a pad, a gap, a second pad, and from it the
-                   bar toward the next Achievement, lit as far as you have come,
-                   with how many to go at its end. The language of the layer
-                   tabs, where a trace breaks at a component. -->
-              <div class="nge-track-head" :style="{ '--track': '#ffd08a', '--frac': (nextBuildingAchievement) ? (nextBuildingAchievement).pct / 100 : 1 }">
-                <div class="nge-track-head-left">
-                  <div class="nge-profile-section-label" title="Splits and merges you made in Pyr, on any of its datasets; edits made in other tools, or before you joined, are not counted. At the right, your Editor Achievements.">▌ Edits in Pyr</div>
-                  <div class="nge-track-wire" aria-hidden="true"></div>
-                </div>
-                <div class="nge-track-head-right">
-                  <div class="nge-track-bar" :title="(nextBuildingAchievement) ? (nextBuildingAchievement).pct + '% of the way to your next Achievement' : 'Every Achievement on this track is yours'"></div>
-                  <div v-if="nextBuildingAchievement" class="nge-track-count" :title="(nextBuildingAchievement).remaining.toLocaleString() + ' more edits to your next Achievement'"><RollUp :value="(nextBuildingAchievement).remaining" /> to go</div>
-                </div>
+                   trace to a pad, a second pad the same small distance away in
+                   every row, and from it the bar toward the next Achievement,
+                   lit as far as the count has come, with how many to go at its
+                   end. The layer tabs' language, where a trace breaks at a
+                   component; the break lands where each label ends. -->
+              <div class="nge-track-head" :style="{ '--frac': (nextBuildingAchievement) ? (nextBuildingAchievement).pct / 100 : 1 }">
+                <div class="nge-profile-section-label" title="Splits and merges you made in Pyr, on any of its datasets; edits made in other tools, or before you joined, are not counted. At the right, your Editor Achievements.">▌ Edits in Pyr</div>
+                <div class="nge-track-wire" aria-hidden="true"></div>
+                <div class="nge-track-pads" aria-hidden="true"></div>
+                <div class="nge-track-bar" :title="(nextBuildingAchievement) ? (nextBuildingAchievement).pct + '% of the way to your next Achievement' : 'Every Achievement on this track is yours'"></div>
+                <div v-if="nextBuildingAchievement" class="nge-track-count" :title="(nextBuildingAchievement).remaining.toLocaleString() + ' more edits to your next Achievement'"><RollUp :value="(nextBuildingAchievement).remaining" /> to go</div>
               </div>
               <div class="nge-track-stats">
           <!-- Edits stats -->
@@ -1420,9 +1475,9 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             <!-- The same rows as the three numbers, as a line from the first
                  day to today (Ames 2026-10-11). Nothing while they load, and
                  nothing for the career fallback, which has no days. -->
-            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="255 208 138" unit="edits" :height="compactRows ? 48 : 76" />
+            <EffortCurve v-if="scopedEditDays && scopedEditDays.length" :days="scopedEditDays" color="255 208 138" unit="edits" :height="tinyRows ? 26 : compactRows ? 36 : 76" />
             <div class="nge-profile-stat-row">
-              <div class="nge-profile-stat-col" v-for="(col, i) in [
+              <div class="nge-profile-stat-col" :class="{ 'nge-profile-stat-col--all': i === 2 }" v-for="(col, i) in [
                 {label:'Today',    val:overviewEdits.today.edits, merges:overviewEdits.today.merges, splits:overviewEdits.today.splits},
                 {label:'Past 7d',  val:overviewEdits.week.edits,  merges:overviewEdits.week.merges,  splits:overviewEdits.week.splits},
                 {label:'All Time', val:overviewEdits.all.edits,   merges:overviewEdits.all.merges,   splits:overviewEdits.all.splits},
@@ -1514,19 +1569,17 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
             <div v-if="totalDays > 0 || LOYALTY_BADGES.length" class="nge-track-row nge-track-row--days">
               <!-- One head for the row (Ames 2026-10-11): the label, a circuit
-                   trace drawn out to a pad, a gap, a second pad, and from it the
-                   bar toward the next Achievement, lit as far as you have come,
-                   with how many to go at its end. The language of the layer
-                   tabs, where a trace breaks at a component. -->
-              <div class="nge-track-head" :style="{ '--track': '#c9a8ff', '--frac': (nextLoyaltyAchievement) ? (nextLoyaltyAchievement).pct / 100 : 1 }">
-                <div class="nge-track-head-left">
-                  <div class="nge-profile-section-label" title="Every day you have shown up, ever. At the right, your Days Achievements.">▌ Days helping science in Pyr</div>
-                  <div class="nge-track-wire" aria-hidden="true"></div>
-                </div>
-                <div class="nge-track-head-right">
-                  <div class="nge-track-bar" :title="(nextLoyaltyAchievement) ? (nextLoyaltyAchievement).pct + '% of the way to your next Achievement' : 'Every Achievement on this track is yours'"></div>
-                  <div v-if="nextLoyaltyAchievement" class="nge-track-count" :title="(nextLoyaltyAchievement).remaining.toLocaleString() + ' more days to your next Achievement'"><RollUp :value="(nextLoyaltyAchievement).remaining" /> to go</div>
-                </div>
+                   trace to a pad, a second pad the same small distance away in
+                   every row, and from it the bar toward the next Achievement,
+                   lit as far as the count has come, with how many to go at its
+                   end. The layer tabs' language, where a trace breaks at a
+                   component; the break lands where each label ends. -->
+              <div class="nge-track-head" :style="{ '--frac': (nextLoyaltyAchievement) ? (nextLoyaltyAchievement).pct / 100 : 1 }">
+                <div class="nge-profile-section-label" title="Every day you have shown up, ever. At the right, your Days Achievements.">▌ Days helping science in Pyr</div>
+                <div class="nge-track-wire" aria-hidden="true"></div>
+                <div class="nge-track-pads" aria-hidden="true"></div>
+                <div class="nge-track-bar" :title="(nextLoyaltyAchievement) ? (nextLoyaltyAchievement).pct + '% of the way to your next Achievement' : 'Every Achievement on this track is yours'"></div>
+                <div v-if="nextLoyaltyAchievement" class="nge-track-count" :title="(nextLoyaltyAchievement).remaining.toLocaleString() + ' more days to your next Achievement'"><RollUp :value="(nextLoyaltyAchievement).remaining" /> to go</div>
               </div>
               <div class="nge-track-stats">
           <!-- Days: total days shown up (never resets), the streaks, and the
@@ -1601,10 +1654,11 @@ const emit = defineEmits({hide: null, 'open-settings': null});
 
             <div class="nge-track-row nge-track-row--rest">
               <div class="nge-track-stats">
-          <!-- Scout report (your tags) and the recent cells list. The list is
-               the browser's own history of cells worked on here; when that is
-               empty it is the cells completed on this dataset from the server's
-               list (recentCells). -->
+          <!-- Your recently completed cells: the browser's own history, or,
+               when that is empty, the server's completions (recentCells). The
+               row takes the height left under the three above and the list
+               scrolls inside it, so the profile never scrolls as a whole
+               (Ames 2026-10-11). -->
           <div class="nge-profile-section nge-profile-section--cells">
             <div class="nge-cell-list" v-if="recentCells.length > 0">
               <div class="nge-cell-list-header">
@@ -1648,7 +1702,11 @@ const emit = defineEmits({hide: null, 'open-settings': null});
             <div class="nge-cell-empty" v-else>
 No cells completed yet. <template v-if="!viewingOtherUser">Your recently completed cells will show here.</template>
             </div>
-
+          </div>
+              </div>
+              <div class="nge-track-achievements nge-track-achievements--rest">
+          <!-- the Scout report (your tags), or another player's annotations -->
+          <div class="nge-profile-section nge-profile-section--scout">
             <template v-if="!viewingOtherUser">
             <!-- Scout Report: tags placed and fixed -->
             <div class="nge-profile-section-label">▌ Scout Report</div>
@@ -1686,62 +1744,7 @@ No cells completed yet. <template v-if="!viewingOtherUser">Your recently complet
               </div>
             </div>
             </template>
-
-            <!-- Cell history list -->
           </div>
-
-          <!-- Building Pyr: how much has been built, from GitHub. Only on
-               the profile of the person building it (Ames 2026-10-10). -->
-          <div v-if="showsBuilding && repoStats" class="nge-profile-section nge-profile-section--building">
-            <div class="nge-profile-section-label">▌ Building Pyr</div>
-            <div class="nge-profile-stat-row nge-profile-stat-row--tiles">
-              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Changes saved to Pyr's code">
-                <div class="nge-profile-stat-label">Commits</div>
-                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.commits" /></div>
-              </div>
-              <div class="nge-profile-stat-col nge-profile-stat-tile nge-profile-stat-tile--build" title="Times a new version of Pyr has gone live">
-                <div class="nge-profile-stat-label">Deploys</div>
-                <div class="nge-profile-stat-val nge-profile-stat-val--hero"><RollUp :value="repoStats.deploys" /></div>
-              </div>
-            </div>
-          </div>
-
-              </div>
-              <div class="nge-track-achievements">
-          <!-- Special Awards (admin-awarded badges) -->
-          <template v-if="profileSpecialBadges.length > 0">
-            <div class="nge-profile-section nge-profile-section--badges nge-profile-section--special">
-              <div class="nge-profile-section-label">★ Special Awards</div>
-              <div class="nge-profile-badges-grid">
-                <div
-                  v-for="award in displayedSpecialBadges"
-                  :key="award.id"
-                  class="nge-profile-badge"
-                  :class="{ 'nge-profile-badge--selected': selectedSpecialBadge?.id === award.id }"
-                  :title="specialBadgeTooltip(award)"
-                  @click="onSpecialBadgeClick(award)"
-                >
-                  <div class="nge-profile-badge-img">
-                    <img :src="award.badge?.thumbnail_url || award.badge?.image_url" :alt="award.badge?.name" class="nge-profile-badge-icon" />
-                  </div>
-                  <div class="nge-profile-badge-name">{{ award.badge?.name || 'Award' }}</div>
-                </div>
-                <!-- View All tile when overflow -->
-                <div
-                  v-if="showSpecialViewAll"
-                  class="nge-profile-badge nge-profile-badge--viewall"
-                  title="View all special awards"
-                  @click="showAllSpecialModal = true"
-                >
-                  <div class="nge-profile-badge-img">
-                    <svg class="nge-profile-badge-viewall-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  </div>
-                  <div class="nge-profile-badge-name">View all</div>
-                </div>
-              </div>
-            </div>
-          </template>
-
               </div>
             </div>
 
@@ -4587,7 +4590,7 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
 /* ── Achievement names are tooltips, not labels (Ames 2026-10-11) ─────────
    The Overview's rows show the art alone; the name shows on hover. The
    rows are shorter for it, with the shelf line redrawn under the art. */
-.nge-track-achievements .nge-profile-badge .nge-profile-badge-name { display: none; }
+:is(.nge-track-achievements, .nge-profile-header-side) .nge-profile-badge .nge-profile-badge-name { display: none; }
 .nge-track-achievements .nge-profile-badges-grid {
   grid-auto-rows: 56px;
   /* no shelf line: with the names gone it read as a stray border under
@@ -4597,23 +4600,23 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
 
 /* ── View all: a round button with a drawn arrow, not a dashed box with a
    text arrow (Ames 2026-10-11) ── */
-.nge-track-achievements .nge-profile-badge--viewall,
-.nge-track-achievements .nge-profile-badge--viewall:hover { background: none; border: none; transform: none; }
-.nge-track-achievements .nge-profile-badge--viewall .nge-profile-badge-img {
+:is(.nge-track-achievements, .nge-profile-header-side) .nge-profile-badge--viewall,
+:is(.nge-track-achievements, .nge-profile-header-side) .nge-profile-badge--viewall:hover { background: none; border: none; transform: none; }
+:is(.nge-track-achievements, .nge-profile-header-side) .nge-profile-badge--viewall .nge-profile-badge-img {
   width: 42px; height: 42px; border-radius: 50%;
   border: 1px solid rgba(140, 195, 255, 0.35);
   background: rgba(74, 158, 255, 0.06);
   color: rgba(170, 210, 255, 0.9);
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s, color 0.15s;
 }
-.nge-track-achievements .nge-profile-badge--viewall:hover .nge-profile-badge-img {
+:is(.nge-track-achievements, .nge-profile-header-side) .nge-profile-badge--viewall:hover .nge-profile-badge-img {
   border-color: rgba(170, 210, 255, 0.9);
   background: rgba(74, 158, 255, 0.14);
   box-shadow: 0 0 14px rgba(74, 158, 255, 0.35);
   color: #fff;
 }
-.nge-track-achievements .nge-profile-badge-viewall-icon { width: 20px; height: 20px; opacity: 1; transition: transform 0.15s; }
-.nge-track-achievements .nge-profile-badge--viewall:hover .nge-profile-badge-viewall-icon { transform: translateX(2px); }
+:is(.nge-track-achievements, .nge-profile-header-side) .nge-profile-badge-viewall-icon { width: 20px; height: 20px; opacity: 1; transition: transform 0.15s; }
+:is(.nge-track-achievements, .nge-profile-header-side) .nge-profile-badge--viewall:hover .nge-profile-badge-viewall-icon { transform: translateX(2px); }
 
 /* ── One row per track (Ames 2026-10-11) ────────────────────────────────
    The stats and curve at the left, that track's Achievements at the right,
@@ -4627,65 +4630,157 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 /* ── The row's head ────────────────────────────────────────────────────────
-   The label, a 1.4px circuit trace drawn out to a pad at the end of the
-   left half, a gap, a second pad at the start of the right half, and from
-   it the bar toward the next Achievement, lit as far as the count has come,
-   with how many to go at its end (Ames 2026-10-11). The two halves are the
-   row's own two columns, so the break sits where the Achievements begin.
-   The language of the layer tabs, where a trace breaks at a component. */
+   The label, a 1.4px circuit trace drawn out to a pad, a second pad 9px
+   further on (the same small distance in every row, as on the layer tabs,
+   where a trace breaks at a component), and from it the bar toward the
+   next Achievement, lit as far as the count has come, ending at a quiet
+   count of how many to go (Ames 2026-10-11). The break lands where each
+   label's wire ends, not at one shared spot. */
 @property --nge-track-run  { syntax: '<number>'; inherits: false; initial-value: 1; }
 @property --nge-track-fill { syntax: '<number>'; inherits: false; initial-value: 1; }
+.nge-track-row--cells { --track: #90fff2; }
+.nge-track-row--edits { --track: #ffd08a; }
+.nge-track-row--days  { --track: #c9a8ff; }
 .nge-track-head {
   grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0 22px;
-  margin-bottom: 12px;
+  display: flex; align-items: center;
+  margin-bottom: 12px; min-width: 0;
 }
-.nge-track-head-left, .nge-track-head-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.nge-track-head .nge-profile-section-label { margin-bottom: 0; white-space: nowrap; color: var(--track); }
-.nge-track-wire, .nge-track-bar { flex: 1 1 0; min-width: 24px; height: 9px; --pad: color-mix(in srgb, var(--track) 70%, transparent); }
+.nge-track-head .nge-profile-section-label { margin: 0 10px 0 0; white-space: nowrap; color: var(--track); }
+.nge-track-wire, .nge-track-pads, .nge-track-bar { height: 9px; --pad: color-mix(in srgb, var(--track) 70%, transparent); }
 .nge-track-wire {
+  flex: 0 1 120px; min-width: 16px;
   --nge-track-run: 1;
+  background: linear-gradient(var(--track), var(--track)) left 50% / calc(100% * var(--nge-track-run)) 1.4px no-repeat;
+  animation: ngeTrackRun 420ms cubic-bezier(0.3, 0, 0.2, 1) 1 both;
+}
+.nge-track-pads {
+  flex: none; width: 22px;
   background:
-    radial-gradient(circle at calc(100% - 4px) 50%, #0a1223 0 0.9px, var(--pad) 1.3px 2.1px, transparent 2.5px),
-    linear-gradient(var(--track), var(--track)) left 50% / calc((100% - 10px) * var(--nge-track-run)) 1.4px no-repeat;
-  animation: ngeTrackRun 480ms cubic-bezier(0.3, 0, 0.2, 1) 1 both;
+    radial-gradient(circle at 4.5px 50%, #0a1223 0 0.9px, var(--pad) 1.3px 2.1px, transparent 2.5px),
+    radial-gradient(circle at 13.5px 50%, #0a1223 0 0.9px, var(--pad) 1.3px 2.1px, transparent 2.5px);
+  animation: ngeTrackPads 180ms linear 420ms 1 both;
 }
 .nge-track-bar {
+  flex: 1 1 0; min-width: 24px;
   --nge-track-fill: 1;
   cursor: help;
   background:
-    radial-gradient(circle at 4px 50%, #0a1223 0 0.9px, var(--pad) 1.3px 2.1px, transparent 2.5px),
-    linear-gradient(var(--track), var(--track)) 10px 50% / calc((100% - 10px) * var(--frac, 1) * var(--nge-track-fill)) 1.4px no-repeat,
-    linear-gradient(rgba(201, 228, 255, 0.14), rgba(201, 228, 255, 0.14)) 10px 50% / calc(100% - 10px) 1.4px no-repeat;
-  animation: ngeTrackFill 560ms cubic-bezier(0.3, 0, 0.2, 1) 1 both;
-  animation-delay: 420ms;
+    linear-gradient(var(--track), var(--track)) left 50% / calc(100% * var(--frac, 1) * var(--nge-track-fill)) 1.4px no-repeat,
+    linear-gradient(rgba(201, 228, 255, 0.14), rgba(201, 228, 255, 0.14)) left 50% / 100% 1.4px no-repeat;
+  animation: ngeTrackFill 560ms cubic-bezier(0.3, 0, 0.2, 1) 560ms 1 both;
 }
 .nge-track-row--edits .nge-track-wire { animation-delay: 120ms; }
-.nge-track-row--edits .nge-track-bar  { animation-delay: 540ms; }
+.nge-track-row--edits .nge-track-pads { animation-delay: 540ms; }
+.nge-track-row--edits .nge-track-bar  { animation-delay: 680ms; }
 .nge-track-row--days  .nge-track-wire { animation-delay: 240ms; }
-.nge-track-row--days  .nge-track-bar  { animation-delay: 660ms; }
+.nge-track-row--days  .nge-track-pads { animation-delay: 660ms; }
+.nge-track-row--days  .nge-track-bar  { animation-delay: 800ms; }
 @keyframes ngeTrackRun  { 0% { --nge-track-run: 0; }  100% { --nge-track-run: 1; } }
+@keyframes ngeTrackPads { 0% { opacity: 0; } 100% { opacity: 1; } }
 @keyframes ngeTrackFill { 0% { --nge-track-fill: 0; } 100% { --nge-track-fill: 1; } }
-@media (prefers-reduced-motion: reduce) { .nge-track-wire, .nge-track-bar { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .nge-track-wire, .nge-track-pads, .nge-track-bar { animation: none; } }
+/* quiet: it is a note at the end of the bar, not a number to read first */
 .nge-track-count {
-  font-family: ui-monospace, 'Cascadia Code', monospace;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700; font-size: 1.02em; white-space: nowrap;
-  color: var(--track);
-  cursor: help;
+  margin-left: 10px;
+  font-size: 0.7em; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+  white-space: nowrap; cursor: help;
+  color: color-mix(in srgb, var(--track) 72%, transparent);
 }
-body.nge-mobile .nge-track-head { grid-template-columns: minmax(0, 1fr); gap: 6px 0; }
+
+/* ── All time is the number that counts: the display face the career totals
+   used, in the track's colour (Ames 2026-10-11) ── */
+.nge-profile-stat-col--all .nge-profile-stat-label { color: var(--track); opacity: 0.85; }
+.nge-profile-stat-col--all .nge-profile-stat-val,
+.nge-track-row--days .nge-profile-stat-val--hero {
+  font-family: 'Orbitron', 'Rajdhani', ui-monospace, 'Cascadia Code', monospace;
+  font-size: 1.6em; font-weight: 700; letter-spacing: 0.02em;
+  color: var(--track);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--track) 35%, transparent);
+}
+.is-compact .nge-profile-stat-col--all .nge-profile-stat-val,
+.is-compact .nge-track-row--days .nge-profile-stat-val--hero { font-size: 1.4em; }
 
 /* the Achievements sit in the middle of their row's height */
 .nge-track-achievements { display: flex; flex-direction: column; justify-content: center; }
+.nge-track-achievements--rest { justify-content: flex-start; }
+
+/* ── No scroll on the Overview (Ames 2026-10-11) ──────────────────────────
+   The three rows take their natural height, the last row takes what is
+   left, and the list scrolls inside its own box. Phones keep scrolling as
+   one page (mobile.css). */
+body:not(.nge-mobile) .nge-profile-col--main { overflow: hidden; display: flex; flex-direction: column; }
+body:not(.nge-mobile) .nge-track-rows { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
+body:not(.nge-mobile) .nge-track-row { flex: none; }
+body:not(.nge-mobile) .nge-track-row--rest { flex: 1 1 0; min-height: 0; }
+body:not(.nge-mobile) .nge-track-row--rest > .nge-track-stats { display: flex; flex-direction: column; min-height: 0; }
+body:not(.nge-mobile) .nge-track-row--rest .nge-profile-section--cells { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+body:not(.nge-mobile) .nge-track-row--rest .nge-cell-list { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; margin-top: 0; }
+body:not(.nge-mobile) .nge-track-row--rest .nge-cell-list-scroll { flex: 1 1 0; min-height: 0; max-height: none; overflow-y: auto; }
+
+/* ── The header: name and bio at the left; Special Awards and, for the
+   builder, Building Pyr at the right ── */
+.nge-profile-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px 28px; }
+.nge-profile-header-main { flex: 1 1 260px; min-width: 0; }
+.nge-profile-header-side { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 26px; padding-top: 4px; }
+.nge-profile-header-side .nge-profile-section { border: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 12px; animation: none; }
+.nge-profile-header-side .nge-profile-section-label { margin: 0; white-space: nowrap; }
+.nge-profile-header-side .nge-profile-badges-grid { display: flex; gap: 8px; grid-auto-rows: auto; background: none; padding: 0; }
+.nge-profile-header-side .nge-profile-badge { padding: 0; }
+.nge-profile-header-side .nge-profile-stat-row--tiles { flex-wrap: nowrap; }
+.nge-profile-header-side .nge-profile-stat-tile { padding: 3px 10px; min-width: 120px; }
 
 /* ── Short screens (laptops): smaller rows so the list under them is in
    reach without much scrolling. The curves draw at 56px (a prop). ── */
-.is-compact .nge-track-row { padding: 8px 0 10px; }
-.is-compact .nge-track-head { margin-bottom: 6px; }
-.is-compact .nge-profile-header { padding-bottom: 4px; margin-bottom: 0; }
+.is-compact .nge-track-row { padding: 6px 0 8px; }
+.is-compact .nge-track-head { margin-bottom: 4px; }
+.is-compact .nge-profile-header { padding-bottom: 2px; margin-bottom: 0; }
+.is-compact .nge-profile-header-side .nge-profile-stat-tile { padding: 1px 8px; min-width: 104px; }
+.is-compact .nge-profile-stat-label { margin-bottom: 2px; }
+.is-compact .nge-profile-stat-breakdown { margin-top: 3px; }
+/* in the compact tiers the curve stays above the numbers and shrinks (36 px,
+   then 30), which is what keeps the list in reach without a scroll
+   (Ames 2026-10-11: no vertical scroll) */
+.is-compact .nge-profile-windows { gap: 3px; }
+.is-compact .nge-profile-windows :deep(.nge-effort) { margin-top: 0; }
+/* the awards side stacks its two sections at the right, so the header stays
+   as tall as the name and bio and never wraps under them */
+.is-compact .nge-profile-header-main { flex: 0 1 auto; max-width: 40%; }
+.is-compact .nge-profile-header-side { flex: 1 1 auto; flex-direction: column; align-items: flex-end; gap: 4px; padding-top: 0; }
+.is-compact .nge-profile-header-side .nge-profile-stat-tile { min-width: 96px; }
+.is-compact .nge-track-row { padding: 4px 0 6px; }
+.is-compact .nge-track-head { margin-bottom: 3px; }
+.is-compact .nge-track-row--days .nge-profile-stat-val--hero { font-size: 1.25em; }
+.is-compact .nge-track-row--days .nge-days-next { margin-top: 1px; }
+.is-compact .nge-cell-list-title { white-space: normal; }
+.is-compact .nge-profile-header-side .nge-profile-badge-img { width: 36px; height: 36px; }
+.is-compact .nge-profile-header-side .nge-profile-badge-icon { width: 32px; height: 32px; }
+.is-compact .nge-profile-stat-label { margin-bottom: 1px; }
+.is-compact .nge-profile-stat-breakdown { margin-top: 2px; }
+.is-tiny .nge-track-row { padding: 3px 0 5px; }
+/* the curve's caption goes on laptops; hovering the curve still reads any day */
+.is-compact :deep(.nge-effort-cap) { display: none; }
+/* on a small laptop the merge and split breakdown goes too; the tooltip keeps it */
+.is-tiny .nge-profile-stat-breakdown { display: none; }
+/* the Scout report's five numbers wrap in the last row's narrow right half */
+.nge-track-achievements--rest .nge-profile-stat-row--scout { flex-wrap: wrap; gap: 8px 18px; }
+.nge-track-achievements--rest .nge-profile-stat-row--scout .nge-profile-stat-col { flex: 0 1 auto; min-width: 64px; }
+/* under 760 px (a small laptop): smaller still, and the bio goes */
+.is-tiny .nge-track-row { padding: 4px 0 6px; }
+.is-tiny .nge-track-head { margin-bottom: 3px; }
+.is-tiny .nge-profile-feature { width: 64px; }
+.is-tiny .nge-profile-feature-icon { width: 40px; height: 40px; }
+.is-tiny .nge-track-row--cells .nge-profile-feature-icon, .is-tiny .nge-track-row--edits .nge-profile-feature-icon { width: 52px; height: 52px; }
+.is-tiny .nge-profile-stat-val { font-size: 1em; }
+.is-tiny .nge-profile-stat-col--all .nge-profile-stat-val, .is-tiny .nge-track-row--days .nge-profile-stat-val--hero { font-size: 1.2em; }
+.is-tiny .nge-profile-stat-label { font-size: 0.68em; margin-bottom: 1px; }
+.is-tiny .nge-profile-stat-breakdown { margin-top: 2px; }
+.is-tiny .nge-profile-bio { display: none; }
+.is-tiny .nge-profile-name { font-size: 1.1em; }
+.is-tiny .nge-track-achievements .nge-profile-badges-grid { grid-auto-rows: 40px; }
+.is-tiny .nge-track-achievements .nge-profile-badge-icon { width: 32px; height: 32px; }
+.is-tiny .nge-profile-windows { gap: 3px; }
+.is-tiny .nge-days-next { margin-top: 2px; }
 .is-compact .nge-profile-name { font-size: 1.25em; }
 .is-compact .nge-profile-bio { margin-top: 0; }
 .is-compact .nge-cell-list { margin-top: 10px; }
