@@ -4647,11 +4647,13 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
   margin-bottom: 12px; min-width: 0;
 }
 .nge-track-head .nge-profile-section-label { margin: 0 10px 0 0; white-space: nowrap; color: var(--track); }
-.nge-track-wire, .nge-track-pads, .nge-track-bar { height: 9px; --pad: color-mix(in srgb, var(--track) 70%, transparent); }
+/* the head's lines sit at about half strength so the curve below, in the
+   same colour, stays the figure (Ames 2026-10-11: "they need distinction") */
+.nge-track-wire, .nge-track-pads, .nge-track-bar { height: 9px; --trace: color-mix(in srgb, var(--track) 52%, transparent); --pad: color-mix(in srgb, var(--track) 55%, transparent); }
 .nge-track-wire {
   flex: 0 1 120px; min-width: 16px;
   --nge-track-run: 1;
-  background: linear-gradient(var(--track), var(--track)) left 50% / calc(100% * var(--nge-track-run)) 1.4px no-repeat;
+  background: linear-gradient(var(--trace), var(--trace)) left 50% / calc(100% * var(--nge-track-run)) 1.4px no-repeat;
   animation: ngeTrackRun 420ms cubic-bezier(0.3, 0, 0.2, 1) 1 both;
 }
 .nge-track-pads {
@@ -4666,7 +4668,7 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
   --nge-track-fill: 1;
   cursor: help;
   background:
-    linear-gradient(var(--track), var(--track)) left 50% / calc(100% * var(--frac, 1) * var(--nge-track-fill)) 1.4px no-repeat,
+    linear-gradient(var(--trace), var(--trace)) left 50% / calc(100% * var(--frac, 1) * var(--nge-track-fill)) 1.4px no-repeat,
     linear-gradient(rgba(201, 228, 255, 0.14), rgba(201, 228, 255, 0.14)) left 50% / 100% 1.4px no-repeat;
   animation: ngeTrackFill 560ms cubic-bezier(0.3, 0, 0.2, 1) 560ms 1 both;
 }
