@@ -4,6 +4,7 @@
     {
       "at": "2026-10-12T13:25:00Z",
       "title": "The profile's numbers line up",
+      "digest": "minor",
       "items": [
         "In your profile, Today, Past 7d and All time now sit on one line, and the merge and split counts under them on one line too.",
         "The Cells completed and Edits blocks take more of their row, so a long count never runs under your Achievements.",
