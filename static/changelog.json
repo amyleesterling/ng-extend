@@ -6,7 +6,8 @@
       "title": "The profile keeps its shape on a very wide screen",
       "digest": "minor",
       "items": [
-        "On a very wide screen the profile overview no longer stretches across the whole window: it keeps the proportions it has on a normal screen and sits in the middle of the frame."
+        "On a very wide screen the profile overview no longer stretches across the whole window: it keeps the proportions it has on a normal screen and sits in the middle of the frame.",
+        "In each row of your profile, the count of what is left to your next Achievement now sits above the arrow to the Trophy Case, where the row ends, instead of at the far edge of the window."
       ]
     },
     {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {ref, computed, onMounted, onUnmounted, watch} from 'vue';
+import {ref, computed, onMounted, onUnmounted, watch, nextTick} from 'vue';
 import {pendingAnnotations, sentAnnotations, loadAnnotationTotal} from '../util/annotation_counter';
 import {nextDayMilestone} from '../util/day_milestones';
 import {storeToRefs} from 'pinia';
@@ -1206,6 +1206,48 @@ function handleClose() {
 }
 
 const emit = defineEmits({hide: null, 'open-settings': null});
+// ── The row heads end above the Achievements' last tile ──────────────────
+// The arrow to the Trophy Case (or the last tile shown) is the row's right
+// edge, not the frame's (Ames 2026-10-13: "82 to go, 21 to go etc should
+// sit above the arrow"). The arrow's column belongs to the tile grid, so
+// each head's width is measured from it: the count's centre lands on the
+// arrow's centre, and the bar ends just before the count.
+let headsRo: ResizeObserver | null = null;
+let headsTimer = 0;
+function layoutTrackHeads() {
+  const root = shellEl.value;
+  if (!root) return;
+  const mobile = document.body.classList.contains('nge-mobile');
+  for (const row of Array.from(root.querySelectorAll<HTMLElement>('.nge-track-row'))) {
+    const head = row.querySelector<HTMLElement>('.nge-track-head');
+    if (!head) continue;
+    const tiles = row.querySelectorAll<HTMLElement>('.nge-track-achievements .nge-profile-badge');
+    const last = tiles[tiles.length - 1];
+    if (!last || mobile) { head.style.removeProperty('--head-end'); continue; }
+    const art = last.querySelector<HTMLElement>('.nge-profile-badge-img') ?? last;
+    const r = row.getBoundingClientRect(), a = art.getBoundingClientRect();
+    const count = head.querySelector<HTMLElement>('.nge-track-count');
+    const end = a.left + a.width / 2 - r.left + (count ? count.offsetWidth / 2 : 0);
+    head.style.setProperty('--head-end', `${Math.round(end)}px`);
+  }
+}
+function scheduleTrackHeads() {
+  void nextTick(layoutTrackHeads);
+  // the count rolls up for a moment after a load: measure again once it has settled
+  clearTimeout(headsTimer);
+  headsTimer = window.setTimeout(layoutTrackHeads, 1800);
+}
+onMounted(() => {
+  scheduleTrackHeads();
+  if (typeof ResizeObserver !== 'undefined' && shellEl.value) {
+    headsRo = new ResizeObserver(() => layoutTrackHeads());
+    headsRo.observe(shellEl.value);
+  }
+});
+onUnmounted(() => { headsRo?.disconnect(); headsRo = null; clearTimeout(headsTimer); });
+watch([activeTab, compactRows, tinyRows, overviewEdits, overviewCells,
+       () => displayedExplorationBadges.value.length, () => displayedBuildingBadges.value.length,
+       () => earnedLoyaltyBadges.value.earned.length], scheduleTrackHeads);
 </script>
 
 <template>
@@ -4733,6 +4775,9 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
   grid-column: 1 / -1;
   display: flex; align-items: center;
   margin-bottom: 12px; min-width: 0;
+  /* ends above the Achievements' last tile (set by layoutTrackHeads), not
+     at the frame's edge (Ames 2026-10-13) */
+  width: var(--head-end, auto); max-width: 100%; justify-self: start; box-sizing: border-box;
 }
 .nge-track-head .nge-profile-section-label { margin: 0 10px 0 0; white-space: nowrap; color: var(--track); }
 /* the head's lines sit at about half strength so the curve below, in the
