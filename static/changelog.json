@@ -2,6 +2,14 @@
   "about": "What changed in Pyr, for players. Newest first. Every deploy that changes something a player can see or do adds an entry at the top: 'at' is when it went live (UTC), the title names it, and each item is one plain sentence a player would understand, with no code words. The game shows these in the 'New version ready' notice. See CHANGELOG-RULE in README.md.",
   "entries": [
     {
+      "at": "2026-10-13T14:38:00Z",
+      "title": "The profile keeps its shape on a very wide screen",
+      "digest": "minor",
+      "items": [
+        "On a very wide screen the profile overview no longer stretches across the whole window: it keeps the proportions it has on a normal screen and sits in the middle of the frame."
+      ]
+    },
+    {
       "at": "2026-10-12T15:43:00Z",
       "title": "The lab's notes in the Delta menu",
       "items": [

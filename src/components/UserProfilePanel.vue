@@ -1289,7 +1289,7 @@ const emit = defineEmits({hide: null, 'open-settings': null});
       </div>
 
       <!-- ── Three-column body (Overview tab) ────────────────── -->
-      <div v-if="activeTab === 'overview'" class="nge-profile-body">
+      <div v-if="activeTab === 'overview'" class="nge-profile-body nge-profile-body--overview">
 
         <!-- LEFT: stats + recent cells -->
         <!-- MAIN: the old left and middle columns as one area of rows, one per
@@ -4642,6 +4642,11 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
 .nge-profile-modal .nge-profile-body--week { width: 100%; max-width: 1180px; align-self: center; max-height: none; }
 .nge-profile-modal .nge-profile-body--dstats { width: 100%; max-width: 1180px; align-self: center; max-height: none; }
 .nge-profile-modal .nge-profile-body--trophy { width: 100%; max-width: 1200px; align-self: center; }
+/* the Overview keeps the proportions it has at 1920 px: on a wider screen
+   (Ames 2026-10-13, a 2560 px window: "look how bad this looks on a super
+   wide screen") the rows no longer stretch, the body is capped and centred
+   in the frame like the other tabs */
+.nge-profile-modal .nge-profile-body--overview { width: 100%; max-width: 1880px; align-self: center; }
 .nge-profile-modal .nge-trophy-scroll { max-height: none; }
 
 /* ── Cells completed and Edits: the curve, then the three windows ──────────
@@ -4795,7 +4800,7 @@ body:not(.nge-mobile) .nge-profile-modal :deep(.nge-overlay.modal.overlay-conten
    one line wraps to two instead. */
 .nge-profile-windows .nge-profile-stat-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(min-content, 1fr));
+  grid-template-columns: repeat(3, minmax(min-content, 210px));  /* never spread across a wide cell */
   gap: 0 16px;  /* the flex rule's gap would open 16 px between the lines */
   align-items: baseline;
 }
