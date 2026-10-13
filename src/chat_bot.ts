@@ -91,9 +91,10 @@ export const NURRO_ANSWERS: Record<string, string> = {
   points: "We don't have a points system... yet! 👀 For now your edits, cells and streaks live on your profile, and the 🏆 Leaderboard crowns the Weekly Champions.",
   share: "Press 📍 next to the chat box to post a link to exactly what you're looking at, with an optional screenshot.",
   tags: 'Found something odd but not sure how to fix it? Press Shift+T for Tag Mode and tag a spot for another player to review.',
+  quests: "A Quest asks one question about a cell, and you answer by annotating. You don't have to proofread the cell. The first is the Cilia Quest, on Retina: open the Cell Library, click Quests, claim a starburst cell, mark its cilium centerline, basal body and daughter centriole, then press Submit. The Instructions button there has the guide, a video and real examples.",
 };
-const ALIASES: Record<string, string> = { commands: 'help', split: 'cut', cell: 'cells', dataset: 'datasets', tag: 'tags', stat: 'stats', point: 'points' };
-const HELP = 'Try !about, !faq, !merge, !cut, !cells, !datasets, !stats, !points, !share, !tags, !leaders, !online or !online @username. Or just say "for science!"';
+const ALIASES: Record<string, string> = { commands: 'help', split: 'cut', cell: 'cells', dataset: 'datasets', tag: 'tags', stat: 'stats', point: 'points', quest: 'quests', cilia: 'quests', cilium: 'quests' };
+const HELP = 'Try !about, !faq, !merge, !cut, !cells, !datasets, !stats, !points, !share, !tags, !quests, !leaders, !online or !online @username. Or just say "for science!"';
 
 /** "!online celiad" / "!online @celiad": whose status to look up, or null. */
 export function onlineTarget(text: string): string | null {
