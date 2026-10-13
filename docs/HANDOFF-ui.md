@@ -270,11 +270,19 @@ Three larger things Ames has asked to be reminded of on Wednesday
 server and database, one file per changelog entry, and type checking the
 Vue files.
 
-## Annotation Quests (prototype, 2026-10-12)
+## Annotation Quests (live since 2026-10-13)
 
 Ames: "Make annotating a cell a Quest in addition to completing a cell."
 Retina first: find and mark every cilium on a starburst amacrine cell. Built
-on `claude/annotation-quests`, not deployed.
+on `claude/annotation-quests`, **live since 2026-10-13** (`ea40fb3`, on
+Ames's "deploy"): the UI, the polyline tool, and the server code in
+`functions/`, which is now on the live branch too, so a function deploy from
+live no longer wipes the quest code. The test branch `annotation-quests` on
+origin was KEPT, on purpose: the lab's reference sheet links the test site
+(see "Where the views live" below). Delete it only once those links point at
+the live address. Waiting on the fork branch, not live: the blog text
+(`docs/blog-cilia-quest.md`) and what the Guide, the chat bot and the Slack
+bot know about quests (the Slack bot also needs its function deployed).
 
 - **The record is the lab's Cilia sheet**
   (`1CXRPE4rmH1SRQ3nqdyp9ULsMdQygJ-Ldjn3jN_jcqRU`, tab gid 0, 93 cells). Its
