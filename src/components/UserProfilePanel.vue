@@ -4935,6 +4935,12 @@ body:not(.nge-mobile) .nge-track-row--rest .nge-cell-list-scroll { flex: 1 1 0; 
    in the plain number colour until the Identification track has a colour */
 .nge-profile-stat-tile--identified .nge-profile-stat-val { color: #d8dde8; text-shadow: none; }
 .nge-track-achievements--rest .nge-profile-section--building { margin-top: 16px; }
+/* the builder's two tiles are small and sit at the left under the Scout
+   report, not stretched across the cell (Ames 2026-10-13: "make my
+   developer stats smaller so they aren't weirdly sticking out") */
+.nge-track-achievements--rest .nge-profile-section--building .nge-profile-stat-row--tiles { display: flex; flex-wrap: wrap; gap: 8px; }
+.nge-track-achievements--rest .nge-profile-section--building .nge-profile-stat-tile { flex: 0 1 auto; min-width: 136px; padding: 3px 12px; gap: 12px; }
+.nge-track-achievements--rest .nge-profile-section--building .nge-profile-stat-val--hero { font-size: 1.1em; }
 /* on laptops it is one line, the label and the two numbers side by side
    with no tiles, so the last row still fits without a scroll */
 .is-compact .nge-track-achievements--rest .nge-profile-section--building { margin-top: 4px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; }
