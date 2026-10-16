@@ -2,6 +2,15 @@
   "about": "What changed in Pyr, for players. Newest first. Every deploy that changes something a player can see or do adds an entry at the top: 'at' is when it went live (UTC), the title names it, and each item is one plain sentence a player would understand, with no code words. The game shows these in the 'New version ready' notice. See CHANGELOG-RULE in README.md.",
   "entries": [
     {
+      "at": "2026-10-16T13:38:00Z",
+      "title": "Profile curves: none on small screens, a settled draw on large ones",
+      "digest": "minor",
+      "items": [
+        "On a laptop or a small screen zoomed in, your profile shows the numbers without the curves. The curves stay on larger screens.",
+        "On larger screens each curve now draws once after the frame has settled, instead of snapping to its end a moment in."
+      ]
+    },
+    {
       "at": "2026-10-15T21:05:49Z",
       "title": "Quest work stays with its quest cell",
       "digest": "minor",
