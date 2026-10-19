@@ -5,7 +5,7 @@
       "at": "2026-10-19T20:44:52Z",
       "title": "Bipolar cell types, and what the AI predicts",
       "items": [
-        "On the Retina, the cell type list now has the bipolar types the lab uses, from RBC and t1 to t9, XBC and GluMI. Point at one to see it spelled out.",
+        "On the Retina, the cell type list now has the bipolar types the lab uses, such as Rod bipolar (RBC), 5o bipolar (t5o) and X bipolar (XBC).",
         "Cells in the Cell Library show the type the lab's AI predicts for them, and the Complete form and the Cell Profile show it too, with a button to use it."
       ]
     },
