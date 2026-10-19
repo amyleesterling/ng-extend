@@ -2,6 +2,14 @@
   "about": "What changed in Pyr, for players. Newest first. Every deploy that changes something a player can see or do adds an entry at the top: 'at' is when it went live (UTC), the title names it, and each item is one plain sentence a player would understand, with no code words. The game shows these in the 'New version ready' notice. See CHANGELOG-RULE in README.md.",
   "entries": [
     {
+      "at": "2026-10-19T20:44:52Z",
+      "title": "Bipolar cell types, and what the AI predicts",
+      "items": [
+        "On the Retina, the cell type list now has the bipolar types the lab uses, from RBC and t1 to t9, XBC and GluMI. Point at one to see it spelled out.",
+        "Cells in the Cell Library show the type the lab's AI predicts for them, and the Complete form and the Cell Profile show it too, with a button to use it."
+      ]
+    },
+    {
       "at": "2026-10-19T20:40:45Z",
       "title": "Type a cell as you complete it",
       "items": [
