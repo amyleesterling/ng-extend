@@ -11,7 +11,7 @@ import { booGhost, isBoo, inSeason } from '../util/spooky';
 import { BADGE_DEFINITIONS } from '../widgets/badge_definitions';
 import { BADGE_IMAGE_MAP } from '../widgets/badge_images';
 import { storeToRefs } from 'pinia';
-import { useChatStore, useProofreadingBackendStore, useUserPreferencesStore, ChatMessage, isSelfMentionToken, CHAT_REACTION_QUICK, CHAT_REACTION_MORE, CHAT_MAX_CHARS, chatTextLength } from '../store';
+import { useChatStore, useProofreadingBackendStore, useUserPreferencesStore, ChatMessage, isSelfMentionToken, CHAT_REACTION_QUICK, CHAT_REACTION_MORE, CHAT_MAX_CHARS, CHAT_ONLINE_MS, chatTextLength } from '../store';
 import ScreenshotDialog from 'components/ScreenshotDialog.vue';
 import { mintShortStateLink } from '../util/state_link';
 import { supabase } from '../supabase';
@@ -442,8 +442,8 @@ function onlineDatasetName(tag: string): string {
   return d?.shortLabel === 'EyeWire II' ? 'Retina' : d?.shortLabel || '';
 }
 const onlineNow = computed(() => {
-  void chatStore.onlineCount;          // the store's tick: people go stale after 90 s
-  const cutoff = Date.now() - 90_000;
+  void chatStore.onlineCount;          // the store's tick: people go stale after CHAT_ONLINE_MS
+  const cutoff = Date.now() - CHAT_ONLINE_MS;
   return Object.entries(chatStore.online)
     .filter(([, p]) => p.lastSeen >= cutoff)
     .map(([id, p]) => ({ id, name: p.name, where: p.dataset ? onlineDatasetName(p.dataset) : '' }))

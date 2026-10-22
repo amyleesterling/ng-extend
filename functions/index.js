@@ -1624,6 +1624,8 @@ const { authorizeData, isPersonalProfileEdit } = require("./community-data");
 const EW_SB = "https://javthknksdcrlhiaaptj.supabase.co/rest/v1/";
 const EW_ORIGINS = [/^https:\/\/([a-z0-9-]+-dot-)?brain-wire-dot-seung-lab\.ue\.r\.appspot\.com$/, /^http:\/\/localhost(:\d+)?$/];
 const ewIdentityCache = new Map(); // token -> { email, caveId, at }
+const { presenceBeats, isPresenceBeat } = require("./presence-beats");
+const ewPresenceBeats = presenceBeats();
 
 // Production access, for the colour of a name in chat (Ames 2026-10-06):
 // may this player EDIT one of the production datasets? CAVE answers, with
@@ -2312,10 +2314,18 @@ exports.ewCommunityData = onRequest(
     res.set("Cache-Control", "no-store");
     if (req.method !== "POST") return res.status(405).json({message:"POST only"});
     if (Buffer.byteLength(JSON.stringify(req.body || {})) > 256 * 1024) return res.status(413).json({message:"Request too large"});
+    let beat = null;
     try {
       const input = req.body || {};
       const who = input.token ? await ewVerify(input.token) : null;
       if (input.token && !who) return res.status(401).json({message:"Sign in again."});
+      // A chat presence heartbeat has its own limit, not the daily write
+      // limit below (functions/presence-beats.js): one written in the last
+      // 20 s for this player is answered here, before any database read.
+      if (who && isPresenceBeat(input)) {
+        beat = ewPresenceBeats.take(who.email);
+        if (!beat) return res.json({status:201,headers:{"Content-Type":"application/json"},body:"[]"});
+      }
       const key = ewServiceKey.value().trim(), sb = ewSb(key);
       const ctx=await pilotContext(sb,who), {me,isAdmin}=ctx;
       const groups = me ? (await sb("user_group_members?user_id=eq."+me.id+"&select=group_id")).map(r=>r.group_id) : [];
@@ -2348,7 +2358,7 @@ exports.ewCommunityData = onRequest(
           if(!badges.some(b=>["Citizen Scientist","Advanced Operator","Mini Michelangelo","Safety Scissors","Merge Master","Cut Master"].includes(b.name))) throw ewErr(403,"This award requires an admin.");
         }
       }
-      if (plan.method !== "GET" && plan.method !== "HEAD") {
+      if (plan.method !== "GET" && plan.method !== "HEAD" && !beat) {
         const quota = await rateLimit({ip:who.email}, true, "write:"+plan.table);
         if (!quota.ok) throw ewErr(429,"Please wait before sending another change.");
       }
@@ -2394,6 +2404,7 @@ exports.ewCommunityData = onRequest(
       if(upstream.ok && plan.table==="tutorial_practice_examples" && ["PATCH","DELETE"].includes(plan.method) && body==="[]") throw ewErr(409,"A learner or reset is using this practice cell. Try again after it is released.");
       // Expected API errors are useful to the SDK; hide database diagnostics.
       if (!upstream.ok) {
+        beat?.release();
         let code; try { code = JSON.parse(body).code; } catch {}
         body = JSON.stringify({code, message:upstream.status===406 ? "Requested row was not found or was not unique." : "The requested operation could not be completed."});
       }
@@ -2404,6 +2415,7 @@ exports.ewCommunityData = onRequest(
       for (const name of ["content-range","range-unit"]) if (upstream.headers.has(name)) responseHeaders[name]=upstream.headers.get(name);
       return res.json({status:upstream.status,headers:responseHeaders,body});
     } catch (e) {
+      beat?.release();
       console.warn("[ewCommunityData]", e.status || 500);
       return res.status(e.status || 500).json({message:e.status ? e.message : "Data is temporarily unavailable."});
     }

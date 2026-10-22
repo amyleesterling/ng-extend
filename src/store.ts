@@ -6287,6 +6287,13 @@ export const CHAT_REACTION_QUICK = ['👍', '❤️', '🔥', '😂', '🎉', '�
 export const CHAT_REACTION_MORE = ['👋', '👌', '👏', '🙌', '🙏', '💯', '✅', '🤝', '🫡', '😀', '😄', '😊', '😎', '🤩', '🥳', '😅', '🤗', '🤔', '👀', '😮', '🤯', '💡', '❓', '😢', '🫂', '💙', '💜', '🔬', '🧬', '🧪', '✂️', '🔗', '🧩', '🗺️', '🏆', '⭐', '✨', '🚀', '🌈'];
 export const CHAT_REACTION_EMOJI = [...CHAT_REACTION_QUICK, ...CHAT_REACTION_MORE];
 
+/** How long after their last heartbeat someone still counts as online, for
+ *  the "N online" count and its list alike. A heartbeat goes out every 60 s
+ *  and, without live updates, the list is read every 60 s (the 2026-10-16
+ *  egress trim), so a row can be 120 s old when it is next read: at 90 s
+ *  people dropped out of the list for part of every minute. */
+export const CHAT_ONLINE_MS = 150_000;
+
 export const useChatStore = defineStore('chat', () => {
   const chatMessages = ref<ChatMessage[]>([]);
   const connected = ref(false);
@@ -6393,10 +6400,10 @@ export const useChatStore = defineStore('chat', () => {
   // trigger stamps joined_at when someone returns after 2+ minutes away
   // (supabase-chat-presence-and-link-screenshots.sql). So a join notice can't
   // be forged, unlike the old open broadcast the security fix removed.
-  const ONLINE_MS = 90_000;
+  const ONLINE_MS = CHAT_ONLINE_MS;
   const HEARTBEAT_MS = 60_000;
   const online = ref<Record<string, { name: string; lastSeen: number; dataset?: string }>>({});
-  /** Bumped every 30 s so onlineCount re-evaluates as people go stale. */
+  /** Bumped every 60 s so onlineCount re-evaluates as people go stale. */
   const presenceTick = ref(0);
   const onlineCount = computed(() => {
     void presenceTick.value; // re-evaluate on the tick; Date.now() is not reactive
