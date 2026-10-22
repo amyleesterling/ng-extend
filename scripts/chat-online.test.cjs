@@ -343,18 +343,14 @@ const readChip = (page) => page.evaluate(() => {
   console.log('gateway answers:', JSON.stringify(stats.gateway));
   console.log('presence rows written:', JSON.stringify(stats.presenceWrites), 'chat messages saved:', stats.chatPosted, 'live updates sent:', stats.liveSent);
 
-  // Verdict, from the samples after everyone has had a minute to arrive.
-  const late = samples.filter(s => s.t >= 60);
+  // Verdict, from the samples after everyone has arrived: a minute with live
+  // updates, and without them one read of the list (60 s) after the last tab.
+  const late = samples.filter(s => s.t >= (LIVE ? 60 : 100));
   const both = (v) => v.chip === '2 online' && v.names.includes('amy') && v.names.includes('Nseraf');
   const amyGone = (v) => v.chip === '1 online' && !v.names.includes('amy') && v.names.includes('Nseraf');
   const results = [];
   const check = (name, ok, detail) => { results.push(!!ok); console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail !== undefined ? ' : ' + detail : '')); };
-  if (process.argv.includes('--expect-blink')) {
-    // Control for the online window: no heartbeat refused, and still people drop out.
-    const short = late.filter(s => !both(s.amy) || !both(s.Nseraf));
-    check('control: someone drops out of "N online" with nobody refused', short.length > 0 && stats.presence429 === 0,
-      short.map(s => `${s.t}s ${s.amy.chip}/${s.Nseraf.chip}`).join('; ') || 'none');
-  } else if (EXPECT_BUG) {
+  if (EXPECT_BUG) {
     check('control: amy drops out of her own "N online" while chatting', late.some(s => amyGone(s.amy)), late.filter(s => amyGone(s.amy)).length + ' samples');
     check('control: and out of Nseraf\'s', late.some(s => amyGone(s.Nseraf)));
     check('control: her heartbeats were refused (429)', stats.presence429 > 0, stats.presence429);

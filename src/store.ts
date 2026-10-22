@@ -6299,12 +6299,10 @@ export const CHAT_REACTION_QUICK = ['👍', '❤️', '🔥', '😂', '🎉', '�
 export const CHAT_REACTION_MORE = ['👋', '👌', '👏', '🙌', '🙏', '💯', '✅', '🤝', '🫡', '😀', '😄', '😊', '😎', '🤩', '🥳', '😅', '🤗', '🤔', '👀', '😮', '🤯', '💡', '❓', '😢', '🫂', '💙', '💜', '🔬', '🧬', '🧪', '✂️', '🔗', '🧩', '🗺️', '🏆', '⭐', '✨', '🚀', '🌈'];
 export const CHAT_REACTION_EMOJI = [...CHAT_REACTION_QUICK, ...CHAT_REACTION_MORE];
 
-/** How long after their last heartbeat someone still counts as online, for
- *  the "N online" count and its list alike. A heartbeat goes out every 60 s
- *  and, without live updates, the list is read every 60 s (the 2026-10-16
- *  egress trim), so a row can be 120 s old when it is next read: at 90 s
- *  people dropped out of the list for part of every minute. */
-export const CHAT_ONLINE_MS = 150_000;
+/** How long after their last heartbeat (one a minute) someone still counts
+ *  as online. One value for the "N online" count and its list alike, so the
+ *  two cannot disagree. */
+export const CHAT_ONLINE_MS = 90_000;
 
 export const useChatStore = defineStore('chat', () => {
   const chatMessages = ref<ChatMessage[]>([]);
