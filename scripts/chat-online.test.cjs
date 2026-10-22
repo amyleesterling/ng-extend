@@ -168,6 +168,7 @@ Module._load = function (request, parent, isMain) {
   if (request === 'firebase-functions/v2/https') return { onRequest: (opts, handler) => handler || opts };
   if (request === 'firebase-functions/params') return { defineSecret: (n) => ({ value: () => (n === 'EW_SUPABASE_SERVICE_KEY' ? 'sb_secret_test' : 'test') }) };
   if (request === 'firebase-admin') return fakeAdmin;
+  if (request === 'firebase-admin/firestore') return { getFirestore: () => fakeDb, FieldValue: fakeAdmin.firestore.FieldValue, Timestamp: fakeAdmin.firestore.Timestamp };
   return realLoad.apply(this, arguments);
 };
 // What the gateway itself fetches: CAVE identity and Supabase. Nothing else.
