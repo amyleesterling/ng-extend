@@ -38,6 +38,7 @@ import {Uint64} from "neuroglancer/util/uint64";
 import {NGE_KEEP_CUT_OPEN_KEY, ngeKeepCutOpen} from 'neuroglancer/datasource/graphene/frontend';
 import {setStatedColor} from "./widgets/widget_utils";
 import {mintShortStateLink} from "./util/state_link";
+import {anyTabVisible, leadership, onSharedResult, shareResult} from './util/tabs';
 
 declare const CONFIG: Config|undefined;
 declare const DEFAULT_SETTINGS: {  [key: string]: any }
@@ -5443,10 +5444,18 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
     notifLimit.value += NOTIF_PAGE;
     await loadNotifications();
   }
-  async function loadNotifications(opts: { newOnly?: boolean } = {}) {
+  /** What the leader tab read on its minute check, for the other tabs
+   *  (util/tabs.ts). reads and dismissed come with a full check only. */
+  interface SharedNotifs { user: string; at: string; rows: any[]; groupIds: string[]; reads?: number[]; dismissed?: number[] }
+  /** shared: rows another tab's check read. They are merged as a check of
+   *  this tab's own would be, without asking the server. share: hand what
+   *  this check read to the other tabs. */
+  async function loadNotifications(opts: { newOnly?: boolean; share?: boolean; shared?: SharedNotifs } = {}) {
     if (!userId.value) return;
-    const now = new Date().toISOString();
-    const newOnly = !!opts.newOnly && !!notifCheckedAt;
+    const s = opts.shared;
+    if (s && s.user !== userId.value) return;
+    const now = s ? s.at : new Date().toISOString();
+    const newOnly = s ? true : !!opts.newOnly && !!notifCheckedAt;
 
     if (!newOnly) {
       // Get user's group IDs for group-targeted notifications
@@ -5466,16 +5475,23 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
       .limit(newOnly ? 50 : notifLimit.value);
     if (newOnly) query = query.or(`id.gt.${notifMaxId},send_at.gt.${notifCheckedAt}`);
 
-    const { data: allNotifs } = await query;
+    const allNotifs = s ? s.rows : (await query).data;
     if (!allNotifs) return;
     if (!newOnly) notificationsHaveMore.value = allNotifs.length >= notifLimit.value;
     for (const n of allNotifs as any[]) if (Number(n.id) > notifMaxId) notifMaxId = Number(n.id);
-    notifCheckedAt = now;
-    if (newOnly && !allNotifs.length) return;
+    if (!s || now > notifCheckedAt) notifCheckedAt = now;
+    if (s) {
+      // What the leader knows of groups, reads and dismissals, added to what
+      // this tab knows (a read or dismissal never goes back).
+      notifGroupIds = s.groupIds;
+      if (s.reads) notificationReads.value = new Set([...notificationReads.value, ...s.reads]);
+      if (s.dismissed) notificationDismissals.value = new Set([...notificationDismissals.value, ...s.dismissed]);
+    }
+    if (newOnly && !allNotifs.length && !s?.dismissed?.length) return;
     // The server already picks what is meant for this player. A group
     // notification for a group joined since the last full load: read the
     // memberships again so it is not filtered out here.
-    if (newOnly && (allNotifs as any[]).some(n => n.target_type === 'group' && !notifGroupIds.includes(String(n.target_id)))) {
+    if (!s && newOnly && (allNotifs as any[]).some(n => n.target_type === 'group' && !notifGroupIds.includes(String(n.target_id)))) {
       const { data: memberships } = await supabase
         .from('user_group_members')
         .select('group_id')
@@ -5510,6 +5526,9 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
       const gone = reads.filter((r: any) => r.dismissed).map((r: any) => r.notification_id);
       notificationReads.value = readsFailed ? new Set([...notificationReads.value, ...ids]) : new Set(ids);
       notificationDismissals.value = readsFailed ? new Set([...notificationDismissals.value, ...gone]) : new Set(gone);
+      if (opts.share) shareResult('notifications', { user: userId.value, at: now, rows: allNotifs, groupIds: notifGroupIds, reads: ids, dismissed: gone } as SharedNotifs);
+    } else if (opts.share && !s) {
+      shareResult('notifications', { user: userId.value, at: now, rows: allNotifs, groupIds: notifGroupIds } as SharedNotifs);
     }
 
     // "Stop sending at" is a deadline for DELIVERY, not for the notification
@@ -5911,28 +5930,48 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
     if (error) console.warn('[notifications] dismiss-all failed:', error.message);
   }
 
+  let notifStopShared: (() => void)[] = [];
+  // Chosen among the tabs that are checking (signed in), so the leader is
+  // never a signed-out tab with nothing to ask for.
+  const notifLeader = leadership('pyr-leader-notifications');
   function subscribeToNotifications() {
     if (notifSubscription) return;
+    notifLeader.join();
     // Private notifications cannot use an anonymous Realtime subscription.
     // Refresh through the identity-verified route, without overlapping requests.
     let refreshing = false;
     let checks = 0;
-    notifSubscription = setInterval(async () => {
-      if (refreshing || document.hidden) return;
+    // A new achievement in the feed opens its celebration, in every tab.
+    const celebrateNew = (existing: Set<number>) => {
+      const row = notifications.value.find(n => !existing.has(n.id) &&
+        n.title?.includes('New Achievement') && n.target_type !== 'group' &&
+        (!n.target_id || n.target_id === userId.value));
+      if (row) pendingBadgeCelebration.value = {
+        title: row.title, body: row.body || '', imageUrl: row.image_url || row.thumbnail_url || '',
+      };
+    };
+    // Only the leader tab asks (Ames 2026-10-25: one check per browser, not
+    // one per tab), while any Pyr tab is in front, and shares what it read.
+    const check = async () => {
+      if (refreshing || !notifLeader.isLeader() || !anyTabVisible()) return;
       refreshing = true;
       checks++;
       const existing = new Set(notifications.value.map(n => n.id));
       try {
-        await loadNotifications({ newOnly: checks % 10 !== 0 });
-        const row = notifications.value.find(n => !existing.has(n.id) &&
-          n.title?.includes('New Achievement') && n.target_type !== 'group' &&
-          (!n.target_id || n.target_id === userId.value));
-        if (row) pendingBadgeCelebration.value = {
-          title: row.title, body: row.body || '', imageUrl: row.image_url || row.thumbnail_url || '',
-        };
+        await loadNotifications({ newOnly: checks % 10 !== 0, share: true });
+        celebrateNew(existing);
       } catch { /* retry on the next refresh */ }
       finally { refreshing = false; }
-    }, 60_000);
+    };
+    notifSubscription = setInterval(() => { void check(); }, 60_000);
+    notifStopShared = [
+      onSharedResult<SharedNotifs>('notifications', async shared => {
+        const existing = new Set(notifications.value.map(n => n.id));
+        try { await loadNotifications({ shared }); celebrateNew(existing); } catch { /* the next one */ }
+      }),
+      // The leader closed and this tab took over: its check is due now.
+      notifLeader.onChange((leader, takeover) => { if (leader && takeover) void check(); }),
+    ];
   }
 
   function unsubscribeFromNotifications() {
@@ -5940,6 +5979,9 @@ export const useProofreadingBackendStore = defineStore('proofreadingBackend', ()
       clearInterval(notifSubscription);
       notifSubscription = null;
     }
+    for (const stop of notifStopShared) stop();
+    notifStopShared = [];
+    notifLeader.leave();
   }
 
   // ── User Groups ───────────────────────────────────────────────────────
@@ -6723,9 +6765,8 @@ export const useChatStore = defineStore('chat', () => {
     void loadMissed();
     pollTimer = setInterval(() => { void loadMissed(); }, POLL_MS);
     // Being online, and who else is, never needed the live connection either.
-    void heartbeat().then(loadOnline);
-    if (!heartbeatTimer) heartbeatTimer = setInterval(() => { void heartbeat(); }, HEARTBEAT_MS);
-    if (!staleTimer) staleTimer = setInterval(() => { presenceTick.value++; if (!document.hidden) void loadOnline(); }, 60_000);
+    void heartbeat().then(() => loadOnline());
+    startPresenceLoops();
   }
   function stopPolling() {
     polling.value = false;
@@ -6763,6 +6804,25 @@ export const useChatStore = defineStore('chat', () => {
   });
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let staleTimer: ReturnType<typeof setInterval> | null = null;
+  // One tab per browser says the player is here and reads who else is
+  // (Ames 2026-10-25), among the tabs with chat connected; the rest are
+  // handed the list. presenceTick runs in every tab so stale names drop.
+  const presenceLeader = leadership('pyr-leader-chat');
+  function startPresenceLoops() {
+    presenceLeader.join();
+    if (!heartbeatTimer) heartbeatTimer = setInterval(() => { if (presenceLeader.isLeader()) void heartbeat(); }, HEARTBEAT_MS);
+    if (!staleTimer) staleTimer = setInterval(() => {
+      presenceTick.value++;
+      if (presenceLeader.isLeader() && anyTabVisible()) void loadOnline(true);
+    }, 60_000);
+  }
+  // The leader closed: this tab says so at once instead of up to a minute on.
+  presenceLeader.onChange((leader, takeover) => {
+    if (leader && takeover && channel) void heartbeat().then(() => loadOnline(true));
+  });
+  onSharedResult<{ user: string; online: typeof online.value }>('chat-online', m => {
+    if (channel && m && m.user === useProofreadingBackendStore().userId) online.value = m.online;
+  });
 
   function sysLine(type: 'join' | 'leave', name: string) {
     const now = new Date();
@@ -6923,7 +6983,7 @@ export const useChatStore = defineStore('chat', () => {
     if (error) console.warn('[chat] presence heartbeat failed:', error.message);
   }
 
-  async function loadOnline() {
+  async function loadOnline(share = false) {
     const since = new Date(Date.now() - ONLINE_MS).toISOString();
     let { data, error } = await supabase.from('chat_presence')
       .select(presenceTakesDataset() ? 'user_id,name,last_seen_at,dataset' : 'user_id,name,last_seen_at').gte('last_seen_at', since).limit(500);
@@ -6935,6 +6995,7 @@ export const useChatStore = defineStore('chat', () => {
     const next: Record<string, { name: string; lastSeen: number; dataset?: string }> = {};
     for (const r of data as any[]) next[r.user_id] = { name: r.name, lastSeen: new Date(r.last_seen_at).getTime(), ...(r.dataset ? { dataset: r.dataset } : {}) };
     online.value = next;
+    if (share) shareResult('chat-online', { user: useProofreadingBackendStore().userId, online: next });
   }
 
   function onPresence(payload: any) {
@@ -7376,9 +7437,8 @@ export const useChatStore = defineStore('chat', () => {
           if (subscribedOnce) void loadMissed();
           subscribedOnce = true;
           // Say we're here (other open chats show the join), then who else is.
-          void heartbeat().then(loadOnline);
-          if (!heartbeatTimer) heartbeatTimer = setInterval(() => { void heartbeat(); }, HEARTBEAT_MS);
-          if (!staleTimer) staleTimer = setInterval(() => { presenceTick.value++; if (!document.hidden) void loadOnline(); }, 60_000);
+          void heartbeat().then(() => loadOnline());
+          startPresenceLoops();
         }
       });
     };
@@ -7492,6 +7552,7 @@ export const useChatStore = defineStore('chat', () => {
       leavePresence();
       if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
       if (staleTimer) { clearInterval(staleTimer); staleTimer = null; }
+      presenceLeader.leave();
       window.removeEventListener('pagehide', leavePresence);
       online.value = {};
       const old = channel;
