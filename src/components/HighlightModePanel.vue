@@ -14,7 +14,8 @@ import { isTouchRef } from '../util/mobile';
 import type { BranchWay } from '../util/branch_tree';
 import { runPanelTrace, runParticleBurst, runPanelLap } from '../util/holo_trace';
 import { pointParticlesOn } from '../util/point_particles';
-import { highlightStyles, saveHighlightStyles, applyStyleColor, highlightNameTaken, MAX_HIGHLIGHT_STYLES, pickUnderMouse, addHighlight, addBranchHighlight, NeedsSomaSide, listHighlights, undoHighlight, handPointsToUndo, clearHighlights, tintRadiusNm, setTintRadiusNm, dimChecked, setDimChecked, highlightsShown, setHighlightsShown, onLayersChanged, showStartMarker, showEndMarker, clearStartMarker, clearLatestHighlight, mecStyles, traceOffReason, addLabMark, addHighlightSpot, sharedLabPick, confirmSomaAtStart, goToStart, addAxonHighlight, addEdgeMarks, workingRoot, type Pick, type HighlightStyle } from '../util/highlight';
+import { highlightStyles, saveHighlightStyles, applyStyleColor, highlightNameTaken, MAX_HIGHLIGHT_STYLES, pickUnderMouse, addHighlight, addBranchHighlight, NeedsSomaSide, listHighlights, undoHighlight, handPointsToUndo, clearHighlights, tintRadiusNm, setTintRadiusNm, dimChecked, setDimChecked, highlightsShown, setHighlightsShown, onLayersChanged, showStartMarker, showEndMarker, clearStartMarker, clearLatestHighlight, mecStyles, traceOffReason, addLabMark, addHighlightSpot, sharedLabPick, confirmSomaAtStart, goToStart, addAxonHighlight, addEdgeMarks, workingRoot, checkedProgress, type Pick, type HighlightStyle } from '../util/highlight';
+import { lightBranchAtPiece } from '../util/lantern';
 import { MEC_KINDS, isMec, mecCounts, somaXyz, startXyz, mecKindOfLayer } from '../util/mec_marks';
 
 const emit = defineEmits({ hide: null });
@@ -245,6 +246,72 @@ const ctrlHeld = ref(false);
 watch([ctrlHeld, hHeld], () => document.body.classList.toggle('nge-highlight-armed', ctrlHeld.value || hHeld.value));
 
 function say(text: string, bad = false, count = '') { message.value = text; messageBad.value = bad; stat.value = count; }
+
+// ── How much is checked, and Next unchecked (Ames 2026-11-02) ─────────────
+// The share of the cell under Checked marks, and the branch ends not yet
+// reached (util/highlight.ts checkedProgress). Measured again a moment after
+// the marks change.
+const progress = ref<{ share: number; left: number } | null>(null);
+const progressWhy = ref('');
+let progressTimer: ReturnType<typeof setTimeout> | undefined;
+let progressAsked = 0;
+function scheduleProgress() {
+  if (progressTimer) clearTimeout(progressTimer);
+  progressTimer = setTimeout(() => { void updateProgress(); }, 700);
+}
+async function updateProgress() {
+  const mine = ++progressAsked;
+  try {
+    const p = await checkedProgress();
+    if (mine !== progressAsked) return;
+    progress.value = { share: p.share, left: p.ends.length };
+    progressWhy.value = '';
+  } catch (e: any) {
+    if (mine !== progressAsked) return;
+    progress.value = null;
+    progressWhy.value = String(e?.message || e);
+  }
+}
+const progressText = computed(() => {
+  const p = progress.value;
+  if (!p) return progressWhy.value || 'Measuring the cell…';
+  const pct = Math.round(p.share * 100);
+  const done = p.share === 0 ? 'Nothing checked yet' : pct < 1 ? 'Under 1% checked' : `About ${pct}% checked`;
+  const ends = p.left === 0 ? 'no ends left' : `${p.left} ${p.left === 1 ? 'end' : 'ends'} left`;
+  return `${done} · ${ends}`;
+});
+/** Ends already visited this session, so each press goes to another one. */
+const visitedEnds = new Set<string>();
+const goingNext = ref(false);
+async function nextUnchecked() {
+  const viewer = (window as any).viewer;
+  if (!viewer || goingNext.value) return;
+  goingNext.value = true;
+  try {
+    const p = await checkedProgress();
+    progress.value = { share: p.share, left: p.ends.length };
+    if (!p.ends.length) { say('Every branch end of this cell is checked. 🎉'); return; }
+    let left = p.ends.filter(e => !visitedEnds.has(`${p.root}:${e.id}`));
+    // Been to them all: start round again.
+    if (!left.length) { for (const e of p.ends) visitedEnds.delete(`${p.root}:${e.id}`); left = p.ends; }
+    const scales: number[] = Array.from(viewer.coordinateSpace.value.scales as Float64Array).map(x => x / 1e-9);
+    const pos = Array.from(viewer.navigationState.position.value as Float32Array);
+    const here = [0, 1, 2].map(i => pos[i] * scales[i]);
+    const dist = (q: number[]) => Math.hypot(q[0] - here[0], q[1] - here[1], q[2] - here[2]);
+    left.sort((a, b) => dist(a.point) - dist(b.point));
+    const end = left[0];
+    visitedEnds.add(`${p.root}:${end.id}`);
+    for (let i = 0; i < 3; i++) pos[i] = end.point[i] / scales[i];
+    viewer.navigationState.position.value = Float32Array.from(pos);
+    say(`${p.ends.length} ${p.ends.length === 1 ? 'end' : 'ends'} left. The Lantern lights this one.`);
+    await lightBranchAtPiece(p.root, end.id, end.point);
+  } catch (e: any) {
+    say(String(e?.message || e), true);
+  } finally {
+    goingNext.value = false;
+  }
+}
+watch([markCount, handCount], scheduleProgress);
 function refresh() {
   markCount.value = listHighlights().length;
   handCount.value = handPointsToUndo();
@@ -544,6 +611,7 @@ function onSelectedLayer() {
 }
 let stopSelectedWatch = () => { /* set on mount */ };
 onMounted(() => {
+  scheduleProgress();
   try {
     const sel = (window as any).viewer.selectedLayer.changed;
     sel.add(onSelectedLayer);
@@ -740,6 +808,13 @@ onBeforeUnmount(() => {
                   class="nge-hl-switch-opt nge-hl-switch-opt--hide" @click="setShown(false)"
                   @keydown.right.prevent.stop="setShown(false)" @keydown.left.prevent.stop="setShown(true)">Hide</button>
         </div>
+      </div>
+      <!-- How much of the cell is checked, and a way to the next end not yet
+           checked (Ames 2026-11-02). -->
+      <div class="nge-hl-progress">
+        <span :class="{ 'nge-hl-dim': !progress }">{{ progressText }}</span>
+        <button class="nge-hl-btn" :disabled="goingNext || busy" @click="nextUnchecked"
+                title="Fly to the nearest branch end you have not checked yet, and light its branch with the Lantern">Next unchecked</button>
       </div>
       <!-- The foot of the box reads like a stats line: what just happened, a
            count or two, quietly (Ames 2026-10-02). -->
@@ -938,6 +1013,8 @@ onBeforeUnmount(() => {
 .nge-hl-width input { flex: 1; min-width: 0; accent-color: #7cffb2; }
 .nge-hl-width-val { width: 52px; text-align: right; font-variant-numeric: tabular-nums; color: #dce6f5; }
 .nge-hl-unit { text-transform: none; }
+.nge-hl-progress { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 11.5px; color: rgba(220, 230, 245, 0.85); }
+.nge-hl-progress > span { min-width: 0; }
 .nge-hl-show3d { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 11.5px; color: rgba(220, 230, 245, 0.72); user-select: none; }
 /* A two way switch in the site's own language (scifi-ui, SCIFIIFY.md): the
    leaderboard's Edits / Cells lettering (Orbitron, tracked, squared corners),

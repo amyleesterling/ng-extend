@@ -372,3 +372,91 @@ export function densestPiece(graph: BranchGraph, radiusNm = 6000): string | unde
   }
   return best;
 }
+
+// ── How much is checked, and what is left (Ames 2026-11-02) ──────────────
+// Highlight's Checked marks are lines along the cell. A piece of the cell is
+// checked when its point lies within `radiusNm` of one: the same reach the
+// colour has on the cell. The share is by cable (the length of the links
+// between pieces), so a dense lump does not count for more than a long thin
+// branch.
+
+/** The pieces whose point lies within `radiusNm` of any of the segments. */
+export function piecesNear(graph: BranchGraph, segments: Segment[], radiusNm: number): Set<string> {
+  const out = new Set<string>();
+  if (!segments.length || !(radiusNm > 0)) return out;
+  // Points along every segment, no further apart than half the reach, in a
+  // grid of cells the size of the reach.
+  const cellOf = (v: number) => Math.floor(v / radiusNm);
+  const grid = new Map<string, number[][]>();
+  const add = (q: number[]) => {
+    const k = `${cellOf(q[0])},${cellOf(q[1])},${cellOf(q[2])}`;
+    const l = grid.get(k); if (l) l.push(q); else grid.set(k, [q]);
+  };
+  for (const [a, b] of segments) {
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    const steps = Math.max(1, Math.ceil(len / (radiusNm / 2)));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      add([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
+    }
+  }
+  // Half a step of slack, as the points along a segment are that far apart.
+  const r = radiusNm * 1.25, r2 = r * r;
+  for (const [id, p] of graph.points) {
+    const gx = cellOf(p[0]), gy = cellOf(p[1]), gz = cellOf(p[2]);
+    search: for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) {
+      for (const q of grid.get(`${gx + dx},${gy + dy},${gz + dz}`) ?? []) {
+        const ex = q[0] - p[0], ey = q[1] - p[1], ez = q[2] - p[2];
+        if (ex * ex + ey * ey + ez * ez <= r2) { out.add(id); break search; }
+      }
+    }
+  }
+  return out;
+}
+
+/** The share of the cell's cable that is checked: a link counts when both
+ *  its pieces are. 0 to 1, and the lengths in nanometres. */
+export function checkedShare(graph: BranchGraph, checked: Set<string>): { share: number; checkedNm: number; totalNm: number } {
+  let total = 0, done = 0;
+  for (const [a, b] of graph.edges) {
+    const p = graph.points.get(a), q = graph.points.get(b);
+    if (!p || !q || a === b) continue;
+    const d = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    total += d;
+    if (checked.has(a) && checked.has(b)) done += d;
+  }
+  return { share: total > 0 ? done / total : 0, checkedNm: done, totalNm: total };
+}
+
+/**
+ * The ends of the cell's branches that are not checked: the pieces with one
+ * neighbour, not in `checked`, at the tip of a twig of at least `minTwigNm`
+ * (walking in from the tip to the first fork), so spines and the graph's
+ * small stubs are not counted as branch ends. Each with its point (nm) and
+ * the twig's length.
+ */
+export function uncheckedEnds(graph: BranchGraph, checked: Set<string>, minTwigNm = 8000): { id: string; point: number[]; twigNm: number }[] {
+  const adj = neighbours(graph);
+  const span = (a: string, b: string) => {
+    const p = graph.points.get(a), q = graph.points.get(b);
+    return p && q ? Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) : 0;
+  };
+  const out: { id: string; point: number[]; twigNm: number }[] = [];
+  for (const [id, nbrs] of adj) {
+    if (nbrs.length !== 1 || checked.has(id)) continue;
+    const point = graph.points.get(id);
+    if (!point) continue;
+    // In from the tip while the way does not fork.
+    let prev = id, cur = nbrs[0], twig = span(id, cur);
+    const seen = new Set([id]);
+    while (twig < minTwigNm && !seen.has(cur)) {
+      seen.add(cur);
+      const next = (adj.get(cur) ?? []).filter(n => n !== prev);
+      if (next.length !== 1) break;
+      twig += span(cur, next[0]);
+      prev = cur; cur = next[0];
+    }
+    if (twig >= minTwigNm) out.push({ id, point, twigNm: twig });
+  }
+  return out;
+}

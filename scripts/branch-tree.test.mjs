@@ -201,3 +201,32 @@ test('with no soma on record, the densest piece stands in for it', { skip: typeo
   for (let i = 0; i < 6; i++) g.points.set(`b${i}`, [Math.cos(i) * 2 * um, Math.sin(i) * 2 * um, 0]);
   assert.ok(['S', 'q', 'b0', 'b1', 'b2', 'b3', 'b4', 'b5'].includes(densestPiece(g, 5 * um)));
 });
+
+// Highlight's progress and Next unchecked: what is checked, and the ends left.
+const loadProgress = () => {
+  const js = strip(fs.readFileSync(new URL('../src/util/branch_tree.ts', import.meta.url), 'utf8')).replace(/^export /gm, '');
+  return new Function(js + ';return {piecesNear, checkedShare, uncheckedEnds};')();
+};
+
+test('pieces near a Checked line count as checked, and the share is by cable', { skip: typeof strip !== 'function' }, () => {
+  const { piecesNear, checkedShare } = loadProgress();
+  const g = longCell();
+  // A Checked line along the u branch, from the fork out: F, u1 and u2.
+  const line = [[L.F, L.u1].map(p => p.map(v => v * um)), [L.u1, L.u2].map(p => p.map(v => v * um))];
+  const checked = piecesNear(g, line, 2 * um);
+  assert.deepEqual([...checked].sort(), ['F', 'u1', 'u2']);
+  const { share, checkedNm, totalNm } = checkedShare(g, checked);
+  // F to u1 and u1 to u2 are each 14.1 um, of 1 + 10 + 1 + 10 + 10 + 4 x 14.1 = 88.6 um in all.
+  assert.ok(Math.abs(checkedNm - 2 * Math.hypot(10, 10) * um) < 1);
+  assert.ok(Math.abs(share - checkedNm / totalNm) < 1e-9 && share > 0.3 && share < 0.33);
+});
+
+test('the ends left are the unchecked tips of real twigs, not spines', { skip: typeof strip !== 'function' }, () => {
+  const { uncheckedEnds } = loadProgress();
+  const g = longCell();
+  // Tips: q (a stub off S, 11 um to the first fork), s (a 1 um spine), u2 and v2 (twigs 28 um to F).
+  const ends = uncheckedEnds(g, new Set(), 12 * um).map(e => e.id).sort();
+  assert.deepEqual(ends, ['u2', 'v2']);
+  // With the u branch checked, only v2 is left.
+  assert.deepEqual(uncheckedEnds(g, new Set(['F', 'u1', 'u2']), 12 * um).map(e => e.id), ['v2']);
+});

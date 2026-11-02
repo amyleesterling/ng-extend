@@ -9,7 +9,7 @@ import { ref } from 'vue';
 import { makeLayer } from 'neuroglancer/layer';
 import { SegmentationUserLayer } from 'neuroglancer/segmentation_user_layer';
 import { ngeGrapheneSelectionUnderMouse, ngeGrapheneFindPath, ngeGrapheneBranchGraph, ngeGraphenePieceOf, SegmentSelection } from 'neuroglancer/datasource/graphene/frontend';
-import { branchSegments, nearestPiece, piecesBeyond, edgeEnds, type BranchGraph, type BranchWay } from './branch_tree';
+import { branchSegments, nearestPiece, piecesBeyond, edgeEnds, piecesNear, checkedShare, uncheckedEnds, type BranchGraph, type BranchWay, type Segment } from './branch_tree';
 import { MEC_KINDS, MEC_AIS, MEC_EDGE, MEC_SOMA, startXyz, isMec, meshEdgeSpots, maskEdgeSpots, cellMeshLoad, dataBoundsNm, AXON_LAYER, mecKindOfLayer, mecLayers, segBoundsNm, EDGE_NM, type MecKind } from './mec_marks';
 import { currentSegLayer, currentSegLayerName, findDatasetBySegName, findDatasetByCanonical, canonicalDataset } from '../datasets';
 import { useUserPreferencesStore, useProofreadingBackendStore } from '../store';
@@ -645,6 +645,64 @@ export function workingRoot(lastRoot?: string | null): string {
   if (ids.length === 1) return ids[0];
   if (lastRoot && ids.includes(lastRoot)) return lastRoot;
   throw new Error(ids.length ? 'Several cells are showing. Click once on the cell you are working on first.' : 'Show the cell you are working on first.');
+}
+
+// ── How much of the cell is checked, and Next unchecked (Ames 2026-11-02:
+// "yeah let's add 1, 2") ─────────────────────────────────────────────────
+// The Checked marks against the cell's branch map (branch_tree.ts): the
+// share of its cable they cover, and the ends of its branches not yet
+// reached, for the Highlight box's progress line and its Next unchecked
+// button, which flies to the nearest such end and lights its branch.
+
+/** Every Checked mark as segments in nanometres (a spot is a segment of
+ *  length 0), and the cell the newest one was made on, if it says. */
+function checkedMarks(): { segments: Segment[]; lastRoot: string | null } {
+  const viewer = viewerOf();
+  const segments: Segment[] = [];
+  let lastRoot: string | null = null;
+  if (!viewer) return { segments, lastRoot };
+  const scalesNm: number[] = Array.from(viewer.coordinateSpace.value.scales as Float64Array).slice(0, 3).map(x => x / 1e-9);
+  const nm = (q: ArrayLike<number>) => [0, 1, 2].map(i => q[i] * (scalesNm[i] || 1));
+  for (const { src, style } of highlightLayers()) {
+    if (style.key !== 'checked') continue;
+    for (const ann of src) {
+      if (!String(ann.id).startsWith(ID_PREFIX)) continue;
+      const cell = String(ann.description ?? '').match(/cell (\d+)/);
+      if (cell) lastRoot = cell[1];
+      if (ann.type === POLYLINE && ann.points) {
+        const ps = (ann.points as ArrayLike<number>[]).map(nm);
+        for (let k = 0; k + 1 < ps.length; k++) segments.push([ps[k], ps[k + 1]]);
+      } else if (ann.type === LINE) {
+        segments.push([nm(ann.pointA), nm(ann.pointB)]);
+      } else if (ann.type === POINT && ann.point) {
+        const p = nm(ann.point);
+        segments.push([p, p]);
+      }
+    }
+  }
+  return { segments, lastRoot };
+}
+
+export interface CheckedProgress {
+  root: string;
+  /** 0 to 1, by cable. */
+  share: number;
+  /** The branch ends not yet checked, each a piece and its point (nm). */
+  ends: { id: string; point: number[] }[];
+}
+
+/** How much of the cell being worked on is checked. Throws with a message a
+ *  player can read when there is no one cell to measure. */
+export async function checkedProgress(): Promise<CheckedProgress> {
+  const layer = currentSegLayer()?.layer;
+  if (!(layer instanceof SegmentationUserLayer)) throw new Error('No segmentation layer is open.');
+  const { segments, lastRoot } = checkedMarks();
+  const root = workingRoot(lastRoot);
+  const graph = await branchGraphOf(layer, root);
+  // As far out as the colour reaches on the cell, and a little more.
+  const checked = piecesNear(graph, segments, Math.max(2500, tintRadiusNm() * 1.2));
+  const { share } = checkedShare(graph, checked);
+  return { root, share, ends: uncheckedEnds(graph, checked).map(e => ({ id: e.id, point: e.point })) };
 }
 
 const AIS_REACH_NM = 15000;

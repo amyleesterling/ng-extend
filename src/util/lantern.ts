@@ -18,7 +18,7 @@
  * (Ames 2026-10-10: "I don't understand height", "remove height"). The
  * renderer can still do it (heightNm), it is simply always 0.
  */
-import {reactive, watch} from 'vue';
+import {nextTick, reactive, watch} from 'vue';
 import {setNgeLantern, type NgeLantern, type NgeLanternMask} from 'neuroglancer/mesh/nge_lantern';
 import {mat4} from 'neuroglancer/util/geom';
 import {SegmentationUserLayer} from 'neuroglancer/segmentation_user_layer';
@@ -424,17 +424,44 @@ async function lightBranchUnderMouse(x: number, y: number) {
   }
   const layer = currentSegLayer()?.layer;
   if (!(layer instanceof SegmentationUserLayer)) return;
+  const scalesNm: number[] = Array.from(viewer.coordinateSpace.value.scales as Float64Array).slice(0, 3).map(x => x / 1e-9);
+  const clickNm = [0, 1, 2].map(i => pick.global[i] * (scalesNm[i] || 1));
+  // The map and the clicked piece are asked for at the same time.
+  const pieceAsked = ngeGraphenePieceOf(layer, pick.selection);
+  await lightBranchFrom(layer, pick.root, `${pick.selection.rootId.low},${pick.selection.rootId.high}`, clickNm, pieceAsked, x, y);
+}
+
+/**
+ * Light the branch that a given piece of a cell is on, as a click there
+ * would (Highlight's Next unchecked, Ames 2026-11-02). Turns the Lantern on
+ * in Clicked branch if it is not already.
+ */
+export async function lightBranchAtPiece(root: string, pieceId: string, pointNm: number[]) {
+  const layer = currentSegLayer()?.layer;
+  if (!(layer instanceof SegmentationUserLayer) || !viewer) return;
+  if (!lantern.on || lantern.mode !== 'branch') {
+    lantern.mode = 'branch';
+    lantern.on = true;
+    // Let the mode and on/off watchers reset the light before it is lit.
+    await nextTick();
+  }
+  let objectKey = '';
+  try { const n = BigInt(root); objectKey = `${Number(n & BigInt(0xffffffff))},${Number(n >> BigInt(32))}`; } catch { /* any cell */ }
+  await lightBranchFrom(layer, root, objectKey, pointNm, Promise.resolve(pieceId));
+}
+
+/** Find and light the branch `pieceAsked` is on, `clickNm` being where the
+ *  light starts; `x`, `y` the click on the page for the gem, if any. */
+async function lightBranchFrom(layer: SegmentationUserLayer, root: string, objectKey: string, clickNm: number[],
+                               pieceAsked: Promise<string | undefined>, x?: number, y?: number) {
   const mine = ++asked;
   const scalesNm: number[] = Array.from(viewer.coordinateSpace.value.scales as Float64Array).slice(0, 3).map(x => x / 1e-9);
   const toNm = (g: ArrayLike<number>) => [0, 1, 2].map(i => g[i] * (scalesNm[i] || 1));
-  const clickNm = toNm(pick.global);
   lanternBranch.status = 'finding';
   lanternBranch.message = '';
-  markClick(x, y);
+  if (x !== undefined && y !== undefined) markClick(x, y);
   try {
-    // The map and the clicked piece are asked for at the same time.
-    const pieceAsked = ngeGraphenePieceOf(layer, pick.selection);
-    const entry = await graphOf(layer, pick.root);
+    const entry = await graphOf(layer, root);
     const {graph} = entry;
     if (mine !== asked) return;
     // The piece clicked: asked of the server, else the nearest one.
@@ -445,7 +472,7 @@ async function lightBranchUnderMouse(x: number, y: number) {
     // The soma: one on record that lies on this cell, else the cell's
     // thickest piece, else its biggest lump of pieces.
     let ref: string | undefined, somaNm: number[] | undefined, best = 25000;
-    for (const s of knownSomas(pick.root)) {
+    for (const s of knownSomas(root)) {
       const near = nearestPiece(graph, toNm(s));
       if (near && near.distNm < best) { best = near.distNm; ref = near.id; somaNm = toNm(s); }
     }
@@ -482,7 +509,7 @@ async function lightBranchUnderMouse(x: number, y: number) {
     if (!built) throw new Error('The server has no positions for that part of the cell.');
     let reach = 0;
     for (const [a, b] of found.segments) for (const p of [a, b]) reach = Math.max(reach, Math.hypot(p[0] - clickNm[0], p[1] - clickNm[1], p[2] - clickNm[2]));
-    branch.mask = {...built.mask, objectKey: `${pick.selection.rootId.low},${pick.selection.rootId.high}`};
+    branch.mask = {...built.mask, objectKey: objectKey || undefined};
     branch.cellNm = built.cellNm;
     branch.clickNm = clickNm;
     branch.reachNm = reach + TUBE_NM;
