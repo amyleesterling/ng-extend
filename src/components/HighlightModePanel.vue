@@ -14,8 +14,8 @@ import { isTouchRef } from '../util/mobile';
 import type { BranchWay } from '../util/branch_tree';
 import { runPanelTrace, runParticleBurst, runPanelLap } from '../util/holo_trace';
 import { pointParticlesOn } from '../util/point_particles';
-import { highlightStyles, saveHighlightStyles, applyStyleColor, highlightNameTaken, MAX_HIGHLIGHT_STYLES, pickUnderMouse, addHighlight, addBranchHighlight, NeedsSomaSide, listHighlights, undoHighlight, handPointsToUndo, clearHighlights, tintRadiusNm, setTintRadiusNm, dimChecked, setDimChecked, highlightsShown, setHighlightsShown, onLayersChanged, showStartMarker, showEndMarker, clearStartMarker, clearLatestHighlight, mecStyles, traceOffReason, addLabMark, addHighlightSpot, sharedLabPick, confirmSomaAtStart, goToStart, addAxonHighlight, addEdgeMarks, workingRoot, checkedProgress, addCheckedBranch, type Pick, type HighlightStyle } from '../util/highlight';
-import { lightBranchAtPiece, litBranch, lanternBranch } from '../util/lantern';
+import { highlightStyles, saveHighlightStyles, applyStyleColor, highlightNameTaken, MAX_HIGHLIGHT_STYLES, pickUnderMouse, addHighlight, addBranchHighlight, NeedsSomaSide, listHighlights, undoHighlight, handPointsToUndo, clearHighlights, tintRadiusNm, setTintRadiusNm, dimChecked, setDimChecked, highlightsShown, setHighlightsShown, onLayersChanged, showStartMarker, showEndMarker, clearStartMarker, clearLatestHighlight, mecStyles, traceOffReason, addLabMark, addHighlightSpot, sharedLabPick, confirmSomaAtStart, goToStart, addAxonHighlight, addEdgeMarks, workingRoot, checkedProgress, addCheckedBranch, setExtraTintLines, type Pick, type HighlightStyle } from '../util/highlight';
+import { branchAtPiece } from '../util/lantern';
 import { MEC_KINDS, isMec, mecCounts, somaXyz, startXyz, mecKindOfLayer } from '../util/mec_marks';
 
 const emit = defineEmits({ hide: null });
@@ -290,7 +290,7 @@ async function nextUnchecked() {
   try {
     const p = await checkedProgress();
     progress.value = { share: p.share, left: p.ends.length };
-    if (!p.ends.length) { say('Every branch end of this cell is checked. 🎉'); return; }
+    if (!p.ends.length) { clearCurrent(); say('Every branch end of this cell is checked. 🎉'); return; }
     let left = p.ends.filter(e => !visitedEnds.has(`${p.root}:${e.id}`));
     // Been to them all: start round again.
     if (!left.length) { for (const e of p.ends) visitedEnds.delete(`${p.root}:${e.id}`); left = p.ends; }
@@ -303,8 +303,14 @@ async function nextUnchecked() {
     visitedEnds.add(`${p.root}:${end.id}`);
     for (let i = 0; i < 3; i++) pos[i] = end.point[i] / scales[i];
     viewer.navigationState.position.value = Float32Array.from(pos);
-    say(`${p.ends.length} ${p.ends.length === 1 ? 'end' : 'ends'} left. The Lantern lights this one.`);
-    await lightBranchAtPiece(p.root, end.id, end.point);
+    // The branch to look at glows amber on the cell, like a highlight that
+    // is not kept; the rest of the cell, and what is already checked, stay
+    // as they are (Ames 2026-11-02: "it needs to better show where I have
+    // been", "it's turning on lantern").
+    const segments = await branchAtPiece(p.root, end.id);
+    current.value = { root: p.root, segments };
+    setExtraTintLines(segments.map(([a, b]) => ({ a, b, rgb: CURRENT_RGB })));
+    say(`${p.ends.length} ${p.ends.length === 1 ? 'end' : 'ends'} left. The branch in amber is next: OK, next marks it Checked.`);
   } catch (e: any) {
     say(String(e?.message || e), true);
   } finally {
@@ -312,14 +318,22 @@ async function nextUnchecked() {
   }
 }
 watch([markCount, handCount], scheduleProgress);
-/** OK, next: the branch the Lantern lights is good. Mark it Checked and go
- *  on to the next end not yet checked. */
-const canOk = computed(() => lanternBranch.status === 'lit' && !goingNext.value && !busy.value);
+/** The branch Next unchecked is showing (in amber), until it is checked. */
+const current = ref<{ root: string; segments: [number[], number[]][] } | null>(null);
+const CURRENT_RGB = [255, 190, 90];
+function clearCurrent() {
+  if (current.value) setExtraTintLines(null);
+  current.value = null;
+}
+/** OK, next: the amber branch is good. Mark it Checked and go on to the
+ *  next end not yet checked. */
+const canOk = computed(() => !!current.value && !goingNext.value && !busy.value);
 async function okNext() {
-  const lit = litBranch();
-  if (!lit) { say('Light a branch first: press Next unchecked, or click one with the Lantern.', true); return; }
+  const c = current.value;
+  if (!c) { say('Press Next unchecked first, to pick a branch.', true); return; }
   try {
-    await addCheckedBranch(lit.root, lit.segments);
+    await addCheckedBranch(c.root, c.segments);
+    clearCurrent();
     refresh();
   } catch (e: any) {
     say(String(e?.message || e), true);
@@ -650,6 +664,7 @@ onMounted(() => {
   requestAnimationFrame(clampPos);
 });
 onBeforeUnmount(() => {
+  clearCurrent();
   stopSelectedWatch();
   stopLayerWatch();
   stopTouchTaps();
@@ -830,9 +845,9 @@ onBeforeUnmount(() => {
         <span :class="{ 'nge-hl-dim': !progress }">{{ progressText }}</span>
         <span class="nge-hl-progress-btns">
           <button class="nge-hl-btn nge-hl-ok" :disabled="!canOk" @click="okNext"
-                  title="The lit branch looks good: mark it Checked and go on to the next end">✓ OK, next</button>
+                  title="The amber branch looks good: mark it Checked and go on to the next end">✓ OK, next</button>
           <button class="nge-hl-btn" :disabled="goingNext || busy" @click="nextUnchecked"
-                  title="Fly to the nearest branch end you have not checked yet, and light its branch with the Lantern">Next unchecked</button>
+                  title="Fly to the nearest branch end you have not checked yet, and show its branch in amber">Next unchecked</button>
         </span>
       </div>
       <!-- The foot of the box reads like a stats line: what just happened, a

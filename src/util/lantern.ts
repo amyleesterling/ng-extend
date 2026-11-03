@@ -458,6 +458,38 @@ export function litBranch(): {root: string; segments: Segment[]} | null {
   return branch.keep && branch.mask && branch.root && branch.segments.length ? {root: branch.root, segments: branch.segments} : null;
 }
 
+/** The soma of a cell for finding its branches: one on record that lies on
+ *  this cell, else the cell's thickest piece, else its biggest lump. */
+async function somaOf(layer: SegmentationUserLayer, root: string, entry: GraphEntry, toNm: (g: ArrayLike<number>) => number[]):
+    Promise<{ref: string; somaNm: number[] | undefined; somaFrom: 'on record' | 'thickest' | 'guessed'}> {
+  const {graph} = entry;
+  let ref: string | undefined, somaNm: number[] | undefined, best = 25000;
+  for (const s of knownSomas(root)) {
+    const near = nearestPiece(graph, toNm(s));
+    if (near && near.distNm < best) { best = near.distNm; ref = near.id; somaNm = toNm(s); }
+  }
+  const thickest = ref ? undefined : await thickestOf(layer, entry);
+  const somaFrom = ref ? 'on record' : thickest ? 'thickest' : 'guessed';
+  if (!ref) { ref = thickest ?? densestPiece(graph); somaNm = ref ? graph.points.get(ref) : undefined; }
+  if (!ref) throw new Error('This cell\'s branch map is empty.');
+  return {ref, somaNm, somaFrom};
+}
+
+/**
+ * The branch a piece of a cell is on, as Clicked branch finds it, without
+ * lighting anything: its lines in nm. Highlight's Next unchecked paints it
+ * on the cell instead (Ames 2026-11-02: "it's turning on lantern").
+ */
+export async function branchAtPiece(root: string, pieceId: string): Promise<Segment[]> {
+  const layer = currentSegLayer()?.layer;
+  if (!(layer instanceof SegmentationUserLayer) || !viewer) throw new Error('No segmentation layer is open.');
+  const scalesNm: number[] = Array.from(viewer.coordinateSpace.value.scales as Float64Array).slice(0, 3).map(x => x / 1e-9);
+  const toNm = (g: ArrayLike<number>) => [0, 1, 2].map(i => g[i] * (scalesNm[i] || 1));
+  const entry = await graphOf(layer, root);
+  const {ref, somaNm} = await somaOf(layer, root, entry, toNm);
+  return clickedBranch(entry.graph, pieceId, ref, {minSideNm: MIN_SIDE_NM, somaNm, somaRadiusNm: SOMA_RADIUS_NM, maxShare: MAX_SHARE}).segments;
+}
+
 /** Find and light the branch `pieceAsked` is on, `clickNm` being where the
  *  light starts; `x`, `y` the click on the page for the gem, if any. */
 async function lightBranchFrom(layer: SegmentationUserLayer, root: string, objectKey: string, clickNm: number[],
@@ -477,18 +509,8 @@ async function lightBranchFrom(layer: SegmentationUserLayer, root: string, objec
     if (mine !== asked) return;
     if (!from || !graph.points.has(from)) from = nearestPiece(graph, clickNm)?.id;
     if (!from) throw new Error('That point is not on a mapped part of this cell.');
-    // The soma: one on record that lies on this cell, else the cell's
-    // thickest piece, else its biggest lump of pieces.
-    let ref: string | undefined, somaNm: number[] | undefined, best = 25000;
-    for (const s of knownSomas(root)) {
-      const near = nearestPiece(graph, toNm(s));
-      if (near && near.distNm < best) { best = near.distNm; ref = near.id; somaNm = toNm(s); }
-    }
-    const thickest = ref ? undefined : await thickestOf(layer, entry);
+    const {ref, somaNm, somaFrom} = await somaOf(layer, root, entry, toNm);
     if (mine !== asked) return;
-    const somaFrom = ref ? 'on record' : thickest ? 'thickest' : 'guessed';
-    if (!ref) { ref = thickest ?? densestPiece(graph); somaNm = ref ? graph.points.get(ref) : undefined; }
-    if (!ref) throw new Error('This cell\'s branch map is empty.');
     const found = clickedBranch(graph, from, ref, {minSideNm: MIN_SIDE_NM, somaNm, somaRadiusNm: SOMA_RADIUS_NM, maxShare: MAX_SHARE});
     const ids = [...found.pieces];
     if (found.fork) ids.push(found.fork);
