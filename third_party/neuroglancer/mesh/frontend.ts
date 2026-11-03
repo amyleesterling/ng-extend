@@ -768,6 +768,15 @@ if (uNgeLanternLight.x > 0.5) {
     highp float inMap = all(greaterThanEqual(maskCoord, vec3(0.0))) && all(lessThanEqual(maskCoord, vec3(1.0))) ? 1.0 : 0.0;
     lit *= uNgeLanternMine * inMap * smoothstep(0.15, 0.6, texture(uNgeLanternMask, maskCoord).r);
   }
+  if (uNgeTintOn > 0.5) {
+    // Highlight marks keep their colour in the shadow, so where the player
+    // has been stays in view (Ames 2026-11-02: "it needs to better show
+    // where I have been").
+    highp vec3 markCoord = (uNgeTintMatrix * vec4(vertexPosition, 1.0)).xyz;
+    if (all(greaterThanEqual(markCoord, vec3(0.0))) && all(lessThanEqual(markCoord, vec3(1.0)))) {
+      lit = max(lit, 0.85 * min(1.0, texture(uNgeTint, markCoord).a * 1.15));
+    }
+  }
   // In shadow a cell keeps its shape and loses its colour.
   highp float grey = dot(vColor.rgb, vec3(0.299, 0.587, 0.114));
   vColor.rgb = mix(vec3(grey) * uNgeLanternLight.z, min(vColor.rgb * uNgeLanternLight.y, vec3(1.0)), lit);
