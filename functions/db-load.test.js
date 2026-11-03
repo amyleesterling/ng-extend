@@ -119,6 +119,30 @@ test('supabase-db-load.sql keeps every number and undoes cleanly', async () => {
   const cached = (await db.query(`SELECT completions_alltime FROM user_edit_counts WHERE id='${uid(6)}'`)).rows[0];
   assert.deepEqual(cached, live);
 
+  // Round 2 (supabase-db-load-2.sql): the refresh skips a minute with no new
+  // edit, and runs again once one is logged.
+  const sql2 = fs.readFileSync(path.join(REPO, 'supabase-db-load-2.sql'), 'utf8');
+  const step2 = n => '-- ' + sql2.split(/^-- @@/m).find(b => b.startsWith(`STEP ${n}:`));
+  await db.exec(step2(1));
+  for (const st of step2(3).match(/CREATE INDEX CONCURRENTLY[\s\S]*?;/g)) await db.query(st);
+  const mark = async () => (await db.query(`SELECT max_edit_id::text AS id, refreshed_at FROM ew_cache_marks WHERE name='leaderboard'`)).rows[0];
+  await db.exec(`SELECT refresh_leaderboard_cache();`);
+  const first = await mark();
+  assert.ok(first, 'first refresh is recorded');
+  await db.exec(`SELECT refresh_leaderboard_cache();`);
+  assert.deepEqual(await mark(), first, 'nothing new: skipped');
+  await db.exec(`INSERT INTO edit_log(user_id,operation,dataset) VALUES('${uid(2)}','merge','pni_mec');`);
+  await db.exec(`SELECT refresh_leaderboard_cache();`);
+  const second = await mark();
+  assert.notEqual(second.id, first.id, 'a new edit refreshes');
+  const liveNow = (await db.query(`SELECT edits_alltime FROM user_edit_counts_live WHERE id='${uid(2)}'`)).rows[0];
+  const cachedNow = (await db.query(`SELECT edits_alltime FROM user_edit_counts WHERE id='${uid(2)}'`)).rows[0];
+  assert.deepEqual(cachedNow, liveNow);
+  // An old mark (over 10 minutes) refreshes even with nothing new.
+  await db.exec(`UPDATE ew_cache_marks SET refreshed_at = now() - interval '11 minutes';`);
+  await db.exec(`SELECT refresh_leaderboard_cache();`);
+  assert.ok(new Date((await mark()).refreshed_at) > new Date(Date.now() - 60000), 'stale mark refreshes');
+
   // Rollbacks for steps 5, 6 and 7 bring back the old objects with the same numbers.
   const rb = sql.slice(sql.indexOf('-- @@ROLLBACK'));
   const NL = String.fromCharCode(10);

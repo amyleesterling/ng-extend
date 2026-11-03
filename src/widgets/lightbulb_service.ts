@@ -473,29 +473,98 @@ function bancTypeLabel(rows: any[]): string {
  * newest mark_complete / unmark_complete decides completion; the newest
  * set_cell_type decides the type.
  */
+const LOG_OPS = ['mark_complete', 'unmark_complete', 'set_cell_type'];
+// Each root's status as read from the log, kept for a minute (2026-11-02:
+// the segment list asked once per segment, one request each, and those reads
+// were a fifth of the database's time). A save of your own drops the root's
+// entry, so your change is never hidden by a kept answer.
+const LOG_STATUS_MS = 60_000;
+const logStatusKept = new Map<string, {at: number; status: CellStatus}>();
+const logKey = (rootId: string) => currentDatasetTag() + ':' + rootId;
+function keptLogStatus(rootId: string): CellStatus | null {
+  const hit = logStatusKept.get(logKey(rootId));
+  return hit && Date.now() - hit.at < LOG_STATUS_MS ? {...hit.status} : null;
+}
+function forgetLogStatus(rootId: string) {
+  logStatusKept.delete(logKey(rootId));
+}
+// Any status change the game announces (a mark, an un-mark, a type) drops
+// the kept answer too, in case a read kept the old one while the save ran.
+if (typeof document !== 'undefined') document.addEventListener('nge:seg-status-changed', (e: Event) => {
+  const id = (e as CustomEvent).detail?.segId;
+  if (id != null) forgetLogStatus(String(id));
+});
+
+/**
+ * The statuses of many roots in a few requests, 100 roots each, kept for
+ * the per-root reads that follow (the segment list, Hide completed). Only
+ * on datasets whose record is the edit log; elsewhere it does nothing.
+ */
+export async function prefetchCellStatuses(rootIds: string[]): Promise<void> {
+  if (getActiveDatasetConfig().annotationLog !== 'edit_log') return;
+  const dataset = currentDatasetTag();
+  const want = [...new Set(rootIds)].filter(id => !keptLogStatus(id));
+  const MAX_ROWS = 5000;
+  for (let i = 0; i < want.length; i += 100) {
+    const chunk = want.slice(i, i + 100);
+    try {
+      const {data, error} = await supabase.from('edit_log')
+        .select('operation,user_id,metadata,timestamp,segment_after')
+        .eq('dataset', dataset).in('segment_after', chunk).in('operation', LOG_OPS)
+        .order('timestamp', {ascending: false}).limit(MAX_ROWS);
+      if (error || !data) return;
+      const byRoot = new Map<string, any[]>();
+      for (const r of data as any[]) {
+        const k = String(r.segment_after);
+        if (!byRoot.has(k)) byRoot.set(k, []);
+        byRoot.get(k)!.push(r);
+      }
+      // A full page may have cut a root's rows short: those roots are asked one by one.
+      const full = data.length >= MAX_ROWS;
+      const at = Date.now();
+      for (const id of chunk) {
+        if (full && !byRoot.has(id)) continue;
+        if (currentDatasetTag() === dataset) logStatusKept.set(dataset + ':' + id, {at, status: statusFromLogRows(byRoot.get(id) ?? [])});
+      }
+    } catch (e) {
+      console.warn('[lightbulb] edit_log status prefetch failed:', e);
+      return;
+    }
+  }
+}
+
 async function statusFromEditLog(rootId: string): Promise<CellStatus> {
-  const status: CellStatus = {isComplete: false};
+  const kept = keptLogStatus(rootId);
+  if (kept) return kept;
   try {
     const {data} = await supabase.from('edit_log')
       .select('operation,user_id,metadata,timestamp')
       .eq('dataset', currentDatasetTag()).eq('segment_after', rootId)
-      .in('operation', ['mark_complete', 'unmark_complete', 'set_cell_type'])
+      .in('operation', LOG_OPS)
       .order('timestamp', {ascending: false}).limit(50);
-    const rows = (data || []) as any[];
-    const done = rows.find(r => r.operation === 'mark_complete' || r.operation === 'unmark_complete');
-    if (done?.operation === 'mark_complete') {
-      status.isComplete = true;
-      status.annotationId = -1;
-      if (done.user_id) status.completedBy = String(done.user_id);
-    }
-    const typed = rows.find(r => r.operation === 'set_cell_type' && r.metadata?.cell_type);
-    if (typed) {
-      status.cellType = String(typed.metadata.cell_type);
-      status.cellTypeAnnotationId = -1;
-      if (typed.user_id) status.labeledBy = String(typed.user_id);
-    }
+    const status = statusFromLogRows((data || []) as any[]);
+    if (data) logStatusKept.set(logKey(rootId), {at: Date.now(), status: {...status}});
+    return status;
   } catch (e) {
     console.warn('[lightbulb] edit_log status read failed:', e);
+    return {isComplete: false};
+  }
+}
+
+/** Completion and type from one root's log rows, newest first. */
+function statusFromLogRows(rows: any[]): CellStatus {
+  const status: CellStatus = {isComplete: false};
+  const done = rows.find(r => r.operation === 'mark_complete' || r.operation === 'unmark_complete');
+  if (done?.operation === 'mark_complete') {
+    status.isComplete = true;
+    status.annotationId = -1;
+    if (done.user_id) status.completedBy = String(done.user_id);
+  }
+  const typed = rows.find(r => r.operation === 'set_cell_type' && r.metadata?.cell_type);
+  if (typed) {
+    status.cellType = String(typed.metadata.cell_type);
+    status.cellTypeAnnotationId = -1;
+    if (typed.user_id) status.labeledBy = String(typed.user_id);
   }
   return status;
 }
@@ -654,6 +723,7 @@ export async function setCellComplete(
     /** Other segments the crosshairs may be on, e.g. a MEC nucleus when the
      *  cell around it is what gets marked. */
     alsoAcceptAtCrosshair: string[] = []): Promise<boolean> {
+  forgetLogStatus(rootId);
   const dsCfg = getActiveDatasetConfig();
   const {cellStatusTable, alignedVolume} = dsCfg;
   lastCompletionProblem = '';
@@ -979,6 +1049,7 @@ export async function saveCellType(
     /** The point to save the type at, in place of the crosshairs: the batch
      *  tool gives each cell the point the player saved inside it. */
     pointOverride?: [number, number, number]): Promise<boolean> {
+  forgetLogStatus(rootId);
   const dsCfg = getActiveDatasetConfig();
   const {cellTypeTable, cellTypeSchema, alignedVolume} = dsCfg;
   lastCellTypeProblem = '';

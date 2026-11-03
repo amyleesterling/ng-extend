@@ -17,7 +17,7 @@
  * whatever its status, so selecting a cell never silently does nothing.
  */
 import { Uint64 } from 'neuroglancer/util/uint64';
-import { getCellStatus, type CellStatus } from '../widgets/lightbulb_service';
+import { getCellStatus, prefetchCellStatuses, type CellStatus } from '../widgets/lightbulb_service';
 
 /** The legend's four kinds, in the Δ's own terms (button_service._applyStatus). */
 export type CellKind = 'todo' | 'proofread' | 'typed' | 'done';
@@ -67,6 +67,7 @@ export async function hideCellsOfKind(serverUrl: string, kind: CellKind, progres
 
   const match: string[] = [];
   let unread = 0, finished = 0, next = 0;
+  await prefetchCellStatuses(ids).catch(() => {});
   const worker = async () => {
     while (next < ids.length) {
       const id = ids[next++];

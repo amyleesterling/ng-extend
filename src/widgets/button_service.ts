@@ -13,7 +13,7 @@ import {currentCellTypes, cellTypeLabel} from '../datasets';
 import {planMenuCompletion, finishMenuCompletion, needsCompletionDetails, reopenAfterUnmark} from '../util/menu_complete';
 import {askCompletionDetails, type CompletionDetails} from '../util/completion_details';
 import {completeStatusesFor, CANT_COMPLETE, AXON_COMPLETE, marksProofread} from '../sheet_sync';
-import {getCellStatus, setCellComplete, saveCellType, CellStatus, getLastCompletionProblem, getLastCellTypeProblem, activeCaveServer, labelAxonComplete} from './lightbulb_service';
+import {getCellStatus, prefetchCellStatuses, setCellComplete, saveCellType, CellStatus, getLastCompletionProblem, getLastCellTypeProblem, activeCaveServer, labelAxonComplete} from './lightbulb_service';
 
 /** The name Pyr shows for a cell: its type, with its classification. */
 function cellLabel(status: CellStatus|null|undefined): string {
@@ -114,7 +114,11 @@ setSegmentLabelRequester(ids => {
   todo.forEach(id => labelAsked.add(id));
   const server = activeCaveServer();
   let next = 0;
+  // Where the edit log is the record (MEC), read them all in a few requests
+  // first; the per-row reads below then answer from what was read.
+  const ready = prefetchCellStatuses(todo).catch(() => {});
   const worker = async () => {
+    await ready;
     while (next < todo.length) {
       const id = todo[next++];
       try {
