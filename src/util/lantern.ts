@@ -254,7 +254,7 @@ const TUBE_NM = 3200;
 /** A branch piece's block of the volume is lit, within WIDE_NM of the
  *  branch's line, unless a side of it is longer than WHOLE_BLOCK_NM. */
 const WHOLE_BLOCK_NM = 30000;
-const WIDE_NM = 6000;
+const WIDE_NM = 4000;  // 6 um lit neighbouring branches too (Ames 2026-11-02: "color overlap beyond the single branch")
 /** The map's budget: 8 MB at most. */
 const MAX_CELLS = 8e6;
 /** How long the light takes to run out along a new branch. */
@@ -262,6 +262,9 @@ const SPREAD_MS = 650;
 
 const branch = {
   mask: null as NgeLanternMask | null,
+  /** The cell and the lines (nm) of the branch that is lit, for OK, next. */
+  root: '',
+  segments: [] as Segment[],
   /** False once the player let go of it (a click on empty space). */
   keep: false,
   clickNm: [0, 0, 0],
@@ -450,6 +453,11 @@ export async function lightBranchAtPiece(root: string, pieceId: string, pointNm:
   await lightBranchFrom(layer, root, objectKey, pointNm, Promise.resolve(pieceId));
 }
 
+/** The branch that is lit now (its cell and its lines in nm), or null. */
+export function litBranch(): {root: string; segments: Segment[]} | null {
+  return branch.keep && branch.mask && branch.root && branch.segments.length ? {root: branch.root, segments: branch.segments} : null;
+}
+
 /** Find and light the branch `pieceAsked` is on, `clickNm` being where the
  *  light starts; `x`, `y` the click on the page for the gem, if any. */
 async function lightBranchFrom(layer: SegmentationUserLayer, root: string, objectKey: string, clickNm: number[],
@@ -517,6 +525,8 @@ async function lightBranchFrom(layer: SegmentationUserLayer, root: string, objec
     branch.forkNm = (found.fork && graph.points.get(found.fork)) || null;
     branch.somaNm = somaNm ?? null;
     branch.somaFrom = somaFrom;
+    branch.root = root;
+    branch.segments = found.segments;
     branch.keep = true;
     spread = 0;
     lanternBranch.status = 'lit';

@@ -14,8 +14,8 @@ import { isTouchRef } from '../util/mobile';
 import type { BranchWay } from '../util/branch_tree';
 import { runPanelTrace, runParticleBurst, runPanelLap } from '../util/holo_trace';
 import { pointParticlesOn } from '../util/point_particles';
-import { highlightStyles, saveHighlightStyles, applyStyleColor, highlightNameTaken, MAX_HIGHLIGHT_STYLES, pickUnderMouse, addHighlight, addBranchHighlight, NeedsSomaSide, listHighlights, undoHighlight, handPointsToUndo, clearHighlights, tintRadiusNm, setTintRadiusNm, dimChecked, setDimChecked, highlightsShown, setHighlightsShown, onLayersChanged, showStartMarker, showEndMarker, clearStartMarker, clearLatestHighlight, mecStyles, traceOffReason, addLabMark, addHighlightSpot, sharedLabPick, confirmSomaAtStart, goToStart, addAxonHighlight, addEdgeMarks, workingRoot, checkedProgress, type Pick, type HighlightStyle } from '../util/highlight';
-import { lightBranchAtPiece } from '../util/lantern';
+import { highlightStyles, saveHighlightStyles, applyStyleColor, highlightNameTaken, MAX_HIGHLIGHT_STYLES, pickUnderMouse, addHighlight, addBranchHighlight, NeedsSomaSide, listHighlights, undoHighlight, handPointsToUndo, clearHighlights, tintRadiusNm, setTintRadiusNm, dimChecked, setDimChecked, highlightsShown, setHighlightsShown, onLayersChanged, showStartMarker, showEndMarker, clearStartMarker, clearLatestHighlight, mecStyles, traceOffReason, addLabMark, addHighlightSpot, sharedLabPick, confirmSomaAtStart, goToStart, addAxonHighlight, addEdgeMarks, workingRoot, checkedProgress, addCheckedBranch, type Pick, type HighlightStyle } from '../util/highlight';
+import { lightBranchAtPiece, litBranch, lanternBranch } from '../util/lantern';
 import { MEC_KINDS, isMec, mecCounts, somaXyz, startXyz, mecKindOfLayer } from '../util/mec_marks';
 
 const emit = defineEmits({ hide: null });
@@ -312,6 +312,21 @@ async function nextUnchecked() {
   }
 }
 watch([markCount, handCount], scheduleProgress);
+/** OK, next: the branch the Lantern lights is good. Mark it Checked and go
+ *  on to the next end not yet checked. */
+const canOk = computed(() => lanternBranch.status === 'lit' && !goingNext.value && !busy.value);
+async function okNext() {
+  const lit = litBranch();
+  if (!lit) { say('Light a branch first: press Next unchecked, or click one with the Lantern.', true); return; }
+  try {
+    await addCheckedBranch(lit.root, lit.segments);
+    refresh();
+  } catch (e: any) {
+    say(String(e?.message || e), true);
+    return;
+  }
+  await nextUnchecked();
+}
 function refresh() {
   markCount.value = listHighlights().length;
   handCount.value = handPointsToUndo();
@@ -813,8 +828,12 @@ onBeforeUnmount(() => {
            checked (Ames 2026-11-02). -->
       <div class="nge-hl-progress">
         <span :class="{ 'nge-hl-dim': !progress }">{{ progressText }}</span>
-        <button class="nge-hl-btn" :disabled="goingNext || busy" @click="nextUnchecked"
-                title="Fly to the nearest branch end you have not checked yet, and light its branch with the Lantern">Next unchecked</button>
+        <span class="nge-hl-progress-btns">
+          <button class="nge-hl-btn nge-hl-ok" :disabled="!canOk" @click="okNext"
+                  title="The lit branch looks good: mark it Checked and go on to the next end">✓ OK, next</button>
+          <button class="nge-hl-btn" :disabled="goingNext || busy" @click="nextUnchecked"
+                  title="Fly to the nearest branch end you have not checked yet, and light its branch with the Lantern">Next unchecked</button>
+        </span>
       </div>
       <!-- The foot of the box reads like a stats line: what just happened, a
            count or two, quietly (Ames 2026-10-02). -->
@@ -1015,6 +1034,9 @@ onBeforeUnmount(() => {
 .nge-hl-unit { text-transform: none; }
 .nge-hl-progress { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 11.5px; color: rgba(220, 230, 245, 0.85); }
 .nge-hl-progress > span { min-width: 0; }
+.nge-hl-progress { flex-wrap: wrap; }
+.nge-hl-progress-btns { display: inline-flex; gap: 6px; margin-left: auto; }
+.nge-hl-ok:not(:disabled) { border-color: rgba(61, 255, 154, 0.55); color: #c9ffe2; }
 .nge-hl-show3d { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 11.5px; color: rgba(220, 230, 245, 0.72); user-select: none; }
 /* A two way switch in the site's own language (scifi-ui, SCIFIIFY.md): the
    leaderboard's Edits / Cells lettering (Orbitron, tracked, squared corners),

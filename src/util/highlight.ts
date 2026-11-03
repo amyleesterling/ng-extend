@@ -683,6 +683,24 @@ function checkedMarks(): { segments: Segment[]; lastRoot: string | null } {
   return { segments, lastRoot };
 }
 
+/** Mark a whole branch Checked at once (Highlight's OK, next, Ames
+ *  2026-11-02: "we need an ok mark or something to mark it good and move
+ *  on"): its lines in nm, as the Lantern lit it. */
+export async function addCheckedBranch(root: string, segments: Segment[]): Promise<void> {
+  const viewer = viewerOf();
+  const style = highlightStyles().find(s => s.key === 'checked');
+  if (!viewer || !style) throw new Error('Highlight is not ready yet.');
+  refuseTrace();
+  const scalesNm: number[] = Array.from(viewer.coordinateSpace.value.scales as Float64Array).map(x => x / 1e-9);
+  const lines = segments.filter(([a, b]) => a[0] !== b[0] || a[1] !== b[1] || a[2] !== b[2]);
+  const segs = (lines.length ? lines : segments.slice(0, 1)) as [number[], number[]][];
+  if (!segs.length) throw new Error('There is no lit branch to mark.');
+  const src = await strokeSource(style);
+  const mark = `${ID_PREFIX}${Date.now().toString(36)}`;
+  addStroke(src, mark, segs, scalesNm, `${style.label}, branch: cell ${root}`);
+  setLatestMark(mark);
+}
+
 export interface CheckedProgress {
   root: string;
   /** 0 to 1, by cable. */
