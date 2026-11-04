@@ -2,6 +2,14 @@
   "about": "What changed in Pyr, for players. Newest first. Every deploy that changes something a player can see or do adds an entry at the top: 'at' is when it went live (UTC), the title names it, and each item is one plain sentence a player would understand, with no code words. The game shows these in the 'New version ready' notice. See CHANGELOG-RULE in README.md.",
   "entries": [
     {
+      "at": "2026-11-04T15:36:00Z",
+      "title": "Profiles open faster",
+      "digest": "minor",
+      "items": [
+        "Your profile shows Cells completed and Edits in Pyr sooner. A profile you have opened before shows its last numbers right away, then brings them up to date."
+      ]
+    },
+    {
       "at": "2026-11-04T15:16:52Z",
       "title": "Colours stay through edits",
       "items": [
