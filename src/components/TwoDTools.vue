@@ -197,5 +197,9 @@ const onName = (p: JumpPair, e: Event) => renamePair(p, (e.target as HTMLInputEl
 .nge-2d button.nge-2d-fold:hover { color: #fff; }
 .nge-2d-slim { padding-top: 4px; }
 .nge-2d:has(.nge-2d-slim) { width: auto; }
+/* The head's buttons sit on one line, centred on the title (Ames 2026-11-04). */
+.nge-2d-head > button { display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; box-sizing: border-box; margin-top: 0; margin-bottom: 0; vertical-align: middle; }
+.nge-2d .nge-2d-head > button.nge-2d-x { font-size: 17px; line-height: 20px; padding: 0 2px; }
+.nge-2d .nge-2d-head > button.nge-2d-info { width: 20px; height: 20px; line-height: 18px; }
 .nge-2d-note { margin: 3px 0; color: #ffd24d; }
 </style>
