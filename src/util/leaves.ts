@@ -8,15 +8,18 @@
  * it goes, and is gone in about ten seconds. The first comes half a minute or
  * so after Pyr opens.
  *
- * A few land on top of the chat box and rest there for a while, until a gust
- * blows them away (Ames: "a little pile"). The turkey kicks up leaves as he
- * walks, and sends any resting ones flying (src/util/turkey.ts calls
- * kickLeaves).
+ * Every leaf that falls onto the chat stays there (Ames: "ALL the leaves
+ * that fall onto chat should stay on chat. it ruins the illusion
+ * otherwise"), so a pile builds up over the showers, stacked a little where
+ * leaves meet. The pile rides on the chat's top edge as it moves or changes
+ * size, hides while the chat sits faded and comes back when it opens. Only
+ * the turkey, kicking through it on his walk, sends leaves flying
+ * (src/util/turkey.ts calls kickLeaves); switching the leaves off clears it.
  *
  * They never get in the way: one see-through canvas that ignores the mouse,
  * made when the first leaf appears and taken away after the last one goes.
- * While only resting leaves are left, nothing is redrawn; it just looks four
- * times a second for when to blow them away.
+ * While only the pile is left, nothing moves: it looks four times a second
+ * whether the chat moved, and redraws only then.
  *
  * The leaf button by the chat box (outside Thanksgiving week, when the turkey
  * button takes its place) and Settings, "Falling leaves", are one switch
@@ -30,8 +33,8 @@ import { AUTUMN, leafShapes, leafVein, pick } from './leaf_shapes';
 
 // Every five to ten minutes (Ames 2026-11-04).
 const FIRST_MS = [25_000, 50_000], EVERY_MS = [5 * 60_000, 10 * 60_000];
-/** How many may rest on the chat box at once, and for how long. */
-const MAX_RESTING = 10, REST_MS = [15_000, 30_000];
+/** The most leaves the pile on the chat holds. */
+const MAX_RESTING = 80;
 
 export function leavesSeason(): boolean { return fallSeason(); }
 
@@ -43,6 +46,8 @@ const reduced = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').
 const between = ([a, b]: number[]) => a + Math.random() * (b - a);
 /** Leaves may show: in season, switched on, a lively screen, a visible tab. */
 export const leavesOn = () => leavesSeason() && !leavesHidden() && !isCalm() && !reduced() && !document.hidden;
+/** Switched off altogether (the pile goes too), as opposed to a hidden tab. */
+const leavesOff = () => !leavesSeason() || leavesHidden() || isCalm() || reduced();
 
 type Kind = 'fall' | 'rest' | 'blow' | 'kick';
 interface Leaf {
@@ -53,8 +58,9 @@ interface Leaf {
   baseX: number; fall: number; sway: number; freq: number;
   /** Falling: lands on the chat box if it meets it. */
   lands: boolean;
-  /** Resting: when it blows away, and the box top it sits on. */
-  restUntil: number; restTop: number;
+  /** Resting: where along the chat's top edge it lies, and how far up the
+   *  pile (where leaves meet they stack). */
+  relX: number; lift: number;
   /** Kicked up: seconds left. */
   life: number;
 }
@@ -68,21 +74,19 @@ function newLeaf(kind: Kind, x: number, y: number, size: number): Leaf {
     kind, x, y, vx: 0, vy: 0, size, rot: Math.random() * 6.283, spin: (Math.random() - 0.5) * 2.4,
     flip: 1.2 + Math.random() * 2, phase: Math.random() * 6.283, squeeze: 1,
     shape: pick(leafShapes()), colour: pick(AUTUMN), alpha: 0.9,
-    baseX: x, fall: 0, sway: 0, freq: 0, lands: false, restUntil: 0, restTop: 0, life: 0,
+    baseX: x, fall: 0, sway: 0, freq: 0, lands: false, relX: 0, lift: 0, life: 0,
   };
 }
 
-/** The chat box leaves land on: the top of the whole chat panel while it is
- *  open, however tall (Ames 2026-11-04: "I thought they were supposed to land
- *  on top of chat!"), or its input bar while it sits quiet. */
+/** The chat box leaves land on: the top of the chat panel while it is open,
+ *  however tall (Ames 2026-11-04: "I thought they were supposed to land on
+ *  top of chat!"), or minimized. Never while it sits faded (quiet): "only
+ *  ... if chat is open or minimized, not in half hidden mode". */
 function chatBox(): DOMRect | null {
-  const shown = (el: Element | null) => {
-    const r = el?.getBoundingClientRect();
-    return r && r.width && r.top > 40 ? r : null;
-  };
   const panel = document.querySelector('.nge-chat-float');
-  const open = panel && !panel.classList.contains('nge-chat-float--quiet') && !panel.classList.contains('nge-chat-float--collapsed') ? shown(panel) : null;
-  return open ?? shown(document.querySelector('.nge-chat-input-wrap'));
+  if (!panel || panel.classList.contains('nge-chat-float--quiet')) return null;
+  const r = panel.getBoundingClientRect();
+  return r.width && r.top > 40 ? r : null;
 }
 
 function blow(l: Leaf, dir = Math.random() < 0.5 ? -1 : 1) {
@@ -119,7 +123,15 @@ function draw() {
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.clearRect(0, 0, W, H);
   const vein = leafVein();
+  const box = chatBox();
   for (const l of leaves) {
+    // The pile sits on the chat's top edge, wherever the chat is now, and
+    // is not drawn while the chat is faded or closed.
+    if (l.kind === 'rest') {
+      if (!box) continue;
+      l.x = box.left + Math.max(6, Math.min(box.width - 6, l.relX));
+      l.y = box.top - l.size * l.squeeze * 0.5 - l.lift;
+    }
     if (l.kind === 'fall') l.x = l.baseX + Math.sin(time * l.freq * 6.283 + l.phase) * l.sway;
     const sq = l.kind === 'rest' ? l.squeeze : 0.25 + 0.75 * Math.abs(Math.cos(time * l.flip + l.phase));
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -137,8 +149,11 @@ function draw() {
   c.globalAlpha = 1;
 }
 
+let lastBox = '';
 function step(now: number) {
-  if (!leavesOn()) { clearAll(); return; }
+  if (leavesOff()) { clearAll(); return; }
+  // A hidden tab: keep everything, look again later.
+  if (document.hidden) { setTimeout(() => { last = performance.now(); requestAnimationFrame(step); }, 1000); return; }
   ensureCanvas();
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now; time += dt;
@@ -156,26 +171,20 @@ function step(now: number) {
         // layer) instead of half of it tucking behind.
         const squeeze = 0.45 + Math.random() * 0.3, top = box.top - l.size * squeeze * 0.5;
         if (before < top && l.y >= top) {
-          l.kind = 'rest'; l.y = top; l.restTop = box.top;
+          l.kind = 'rest'; l.relX = l.x - box.left;
+          // Stacks a little on the leaves already lying where it lands.
+          const under = leaves.filter(o => o.kind === 'rest' && o !== l && Math.abs(o.relX - l.relX) < 12).length;
+          l.lift = Math.min(5, under) * 3;
           l.rot = Math.PI / 2 * (Math.random() < 0.5 ? 1 : -1) + (Math.random() - 0.4) * 0.3;
           l.squeeze = squeeze;
-          l.restUntil = now + between(REST_MS);
           resting++;
         }
-      }
-    } else if (l.kind === 'rest') {
-      if (now > l.restUntil) blow(l);
-      // The chat box changed under it (faded to its small size, grew, moved
-      // or closed): it slips off and falls again, landing on the new top if
-      // there is one, instead of blowing away at once.
-      else if (!box || Math.abs(box.top - l.restTop) > 3 || l.x < box.left || l.x > box.right) {
-        l.kind = 'fall'; l.baseX = l.x; l.sway = 4; l.freq = 0.6; l.fall = 90; l.lands = true;
       }
     } else if (l.kind === 'blow') {
       l.vy += 140 * dt;
       l.x += l.vx * dt; l.y += l.vy * dt;
       l.rot += l.spin * dt;
-    } else {
+    } else if (l.kind === 'kick') {
       // Kicked up by the turkey: a little arc, fading out.
       l.vy += 420 * dt;
       l.x += l.vx * dt; l.y += l.vy * dt;
@@ -184,13 +193,17 @@ function step(now: number) {
       l.alpha = Math.max(0, Math.min(0.9, l.life * 1.5));
     }
   }
-  leaves = leaves.filter(l => l.y < H + 40 && l.x > -60 && l.x < W + 60 && (l.kind !== 'kick' || l.life > 0));
+  leaves = leaves.filter(l => l.kind === 'rest' || (l.y < H + 40 && l.x > -60 && l.x < W + 60 && (l.kind !== 'kick' || l.life > 0)));
   if (!leaves.length) { clearAll(); return; }
-  draw();
-  // Only resting leaves left: nothing moves, so look again a little later.
+  // Only the pile left: nothing moves, so redraw only when the chat moved,
+  // and look again a little later.
   if (leaves.every(l => l.kind === 'rest')) {
+    const key = box ? `${box.left},${box.top},${box.width}` : '';
+    if (key !== lastBox) { lastBox = key; draw(); }
     setTimeout(() => { last = performance.now(); requestAnimationFrame(step); }, 250);
   } else {
+    lastBox = '';
+    draw();
     requestAnimationFrame(step);
   }
 }
@@ -213,7 +226,7 @@ export function shower() {
     l.fall = 75 + Math.random() * 55;
     l.sway = 18 + Math.random() * 40;
     l.freq = 0.5 + Math.random() * 0.7;
-    l.lands = Math.random() < 0.8;
+    l.lands = true;
     leaves.push(l);
   }
   // A few more over the chat box, so a little pile always gathers there.
