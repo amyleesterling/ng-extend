@@ -323,15 +323,11 @@ export function startTwoDTools() {
 export function addPair() {
   if (twoD.pairs.length >= MAX_PAIRS) { twoD.note = `${MAX_PAIRS} pairs is the most here. Remove one first.`; return; }
   twoD.pairs.push({ id: newId(), name: `Jump ${twoD.pairs.length + 1}`, a: position(), b: null, skip: true });
-  // Setting a side also captures it (Ames 2026-11-04: "+ New pair to save a
-  // screencapture of your current 2D spot"): A is Capture 1, B is Capture 2.
-  capture(0);
   twoD.note = 'A is set here. Go to the other side, then press Set B.';
   save();
 }
 export function setSide(pair: JumpPair, side: 'a' | 'b') {
   pair[side] = position();
-  capture(side === 'a' ? 0 : 1);
   twoD.note = '';
   save();
 }

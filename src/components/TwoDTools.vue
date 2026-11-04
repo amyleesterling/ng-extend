@@ -62,8 +62,8 @@ const onName = (p: JumpPair, e: Event) => renamePair(p, (e.target as HTMLInputEl
     </div>
 
     <div v-if="slim" class="nge-2d-row nge-2d-slim">
-      <button type="button" class="nge-2d-btn" title="A new pair, A here (also Capture 1)" @click="slimA">A</button>
-      <button type="button" class="nge-2d-btn" :class="{ 'nge-2d-btn--ask': slimPair && !slimPair.b }" :disabled="!slimPair" title="Set B here (also Capture 2)" @click="slimB">B</button>
+      <button type="button" class="nge-2d-btn" title="A new pair, A here" @click="slimA">A</button>
+      <button type="button" class="nge-2d-btn" :class="{ 'nge-2d-btn--ask': slimPair && !slimPair.b }" :disabled="!slimPair" title="Set B here" @click="slimB">B</button>
       <button type="button" class="nge-2d-btn nge-2d-btn--go" :disabled="!slimPair?.a || !slimPair?.b" title="Jump to the other side (J)" @click="slimJump">⇄</button>
       <button type="button" class="nge-2d-btn" :class="{ 'nge-2d-btn--on': twoD.lasso }" :aria-pressed="twoD.lasso" title="Lasso: drag on the 2D view. Esc stops." @click="twoD.lasso = !twoD.lasso">Lasso</button>
       <button type="button" class="nge-2d-dot nge-2d-dot--on" :style="{ background: twoD.color }" title="Lasso color: click for the next" aria-label="Next lasso color" @click="nextColor"></button>
@@ -71,9 +71,9 @@ const onName = (p: JumpPair, e: Event) => renamePair(p, (e.target as HTMLInputEl
 
     <div v-if="help && !slim" class="nge-2d-help">
       <p>For working across a misalignment or other tricky traces across 2D sections.</p>
-      <p><b>Jump pairs:</b> on one side, press <b>+ New pair</b> to save a screencapture of your current 2D spot. Scroll to the other side and press <b>Set B</b>. Then <b>⇄</b>, or the <b>J</b> key, let you jump between the sections.</p>
+      <p><b>Jump pairs:</b> on one side, press <b>+ New pair</b> to save your current 2D spot. Scroll to the other side and press <b>Set B</b>. Then <b>⇄</b>, or the <b>J</b> key, let you jump between the sections.</p>
       <p>Click <b>Skip</b> to disable sections between A and B while scrolling.<template v-if="stretches.length"> Known bad stretches occur at {{ stretches.join(', ') }} and offer <b>Jump over</b> when you reach them.</template></p>
-      <p><b>Lasso:</b> pick a color and drag around to color a shape in the 2D view screencapture. Remove a shape with <b>×</b>.</p>
+      <p><b>Lasso:</b> pick a color and drag around to color a shape in the 2D view. Remove a shape with <b>×</b>.</p>
       <p><b>Compare:</b> press <b>Capture 1</b> on one slice and <b>Capture 2</b> on another. <b>View large</b> shows them side by side, and <b>Download</b> saves both in one picture, lassos included.</p>
       <p class="nge-2d-small">From an idea and player script by Nseraf, Krzysztof Kruk and annkri. Drag this box by its top, and ▾ collapses it to one row.</p>
     </div>
