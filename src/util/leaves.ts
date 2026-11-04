@@ -12,9 +12,10 @@
  * that fall onto chat should stay on chat. it ruins the illusion
  * otherwise"), so a pile builds up over the showers, stacked a little where
  * leaves meet. The pile rides on the chat's top edge as it moves or changes
- * size, hides while the chat sits faded and comes back when it opens. Only
- * the turkey, kicking through it on his walk, sends leaves flying
- * (src/util/turkey.ts calls kickLeaves); switching the leaves off clears it.
+ * size, hides while the chat sits faded and comes back when it opens.
+ * Minimizing the chat blows about half of it away, and the turkey kicks
+ * leaves flying as he walks through (src/util/turkey.ts calls kickLeaves);
+ * switching the leaves off clears it.
  *
  * They never get in the way: one see-through canvas that ignores the mouse,
  * made when the first leaf appears and taken away after the last one goes.
@@ -149,7 +150,8 @@ function draw() {
   c.globalAlpha = 1;
 }
 
-let lastBox = '';
+let lastBox = '', wasMinimized = false;
+const chatMinimized = () => !!document.querySelector('.nge-chat-float.nge-chat-float--collapsed');
 function step(now: number) {
   if (leavesOff()) { clearAll(); return; }
   // A hidden tab: keep everything, look again later.
@@ -158,6 +160,16 @@ function step(now: number) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now; time += dt;
   const box = chatBox();
+  // Minimizing the chat is a gust: about half the pile blows away, always
+  // the leaves past the end of the smaller bar (Ames: "I liked it when I
+  // minimized chat the pile semi-blew away").
+  const minimized = chatMinimized();
+  if (minimized && !wasMinimized && box) {
+    for (const l of leaves) {
+      if (l.kind === 'rest' && (l.relX > box.width - 6 || Math.random() < 0.5)) blow(l, 1);
+    }
+  }
+  wasMinimized = minimized;
   let resting = leaves.filter(l => l.kind === 'rest').length;
   for (const l of leaves) {
     if (l.kind === 'fall') {
