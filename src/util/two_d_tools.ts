@@ -323,10 +323,34 @@ export function startTwoDTools() {
 export function addPair() {
   if (twoD.pairs.length >= MAX_PAIRS) { twoD.note = `${MAX_PAIRS} pairs is the most here. Remove one first.`; return; }
   twoD.pairs.push({ id: newId(), name: `Jump ${twoD.pairs.length + 1}`, a: position(), b: null, skip: true });
+  // Setting a side also captures it (Ames 2026-11-04: "+ New pair to save a
+  // screencapture of your current 2D spot"): A is Capture 1, B is Capture 2.
+  capture(0);
   twoD.note = 'A is set here. Go to the other side, then press Set B.';
   save();
 }
-export function setSide(pair: JumpPair, side: 'a' | 'b') { pair[side] = position(); twoD.note = ''; save(); }
+export function setSide(pair: JumpPair, side: 'a' | 'b') {
+  pair[side] = position();
+  capture(side === 'a' ? 0 : 1);
+  twoD.note = '';
+  save();
+}
+/** The pair the slim bar works on: the newest of the player's own. */
+export function currentPair(): JumpPair | null {
+  for (let i = twoD.pairs.length - 1; i >= 0; i--) if (!twoD.pairs[i].id.startsWith('preset-')) return twoD.pairs[i];
+  return null;
+}
+/** The slim bar's A: a new pair, A here. Its B: B of the newest pair. */
+export function slimA() { addPair(); }
+export function slimB() { const p = currentPair(); if (p) setSide(p, 'b'); else twoD.note = 'Press A first, on the other side.'; }
+export function slimJump() { const p = currentPair(); if (p?.a && p.b) jumpAcross(p); }
+/** The known bad stretches here, for the (i): "z 2650 to 2663". */
+export function knownStretches(): string[] {
+  return twoD.pairs.filter(p => p.id.startsWith('preset-') && p.a && p.b).map(p => {
+    const z = [p.a![2], p.b![2]].sort((x, y) => x - y);
+    return `z ${z[0] + 1} to ${z[1] - 1}`;
+  });
+}
 export function renamePair(pair: JumpPair, name: string) { pair.name = name.slice(0, 40) || pair.name; save(); }
 export function removePair(pair: JumpPair) {
   twoD.pairs = twoD.pairs.filter(p => p.id !== pair.id);

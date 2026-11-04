@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** The 2D Tools box, a prototype (util/two_d_tools.ts). */
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { twoD, startTwoDTools, addPair, setSide, renamePair, removePair, goTo, jumpAcross, toggleSkip, removeShape, clearSlice, capture, downloadCompare, LASSO_COLORS, type JumpPair } from '../util/two_d_tools';
+import { twoD, startTwoDTools, addPair, setSide, currentPair, slimA, slimB, slimJump, knownStretches, renamePair, removePair, goTo, jumpAcross, toggleSkip, removeShape, clearSlice, capture, downloadCompare, LASSO_COLORS, type JumpPair } from '../util/two_d_tools';
 
 onMounted(startTwoDTools);
 const shapesHere = computed(() => twoD.shapes.filter(s => s.z === twoD.z));
@@ -41,6 +41,14 @@ const bigShots = computed(() => twoD.captures.filter((c): c is NonNullable<typeo
 const help = ref(false);
 function onBigKey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); big.value = false; } }
 watch(big, on => { if (on) window.addEventListener('keydown', onBigKey, true); else window.removeEventListener('keydown', onBigKey, true); });
+// Collapsed: one row to tag side A and B and lasso (Ames 2026-11-04: "a
+// collapsed way to tag side a / b lasso"). Remembered.
+const SLIM_KEY = 'nge_2d_tools_slim';
+const slim = ref((() => { try { return localStorage.getItem(SLIM_KEY) === '1'; } catch { return false; } })());
+watch(slim, v => { try { localStorage.setItem(SLIM_KEY, v ? '1' : '0'); } catch { /* blocked */ } });
+const slimPair = computed(() => currentPair());
+function nextColor() { const i = LASSO_COLORS.indexOf(twoD.color); twoD.color = LASSO_COLORS[(i + 1) % LASSO_COLORS.length]; }
+const stretches = computed(() => knownStretches());
 const onName = (p: JumpPair, e: Event) => renamePair(p, (e.target as HTMLInputElement).value.trim());
 </script>
 
@@ -48,19 +56,29 @@ const onName = (p: JumpPair, e: Event) => renamePair(p, (e.target as HTMLInputEl
   <div v-if="twoD.open" ref="box" class="nge-2d" :style="pos ? { left: pos.left + 'px', top: pos.top + 'px' } : undefined" @keydown.stop @keyup.stop @keypress.stop>
     <div class="nge-2d-head" title="Drag to move" @mousedown="startDrag">
       <span class="nge-2d-title">2D Tools <span class="nge-2d-tag">prototype</span></span>
-      <button type="button" class="nge-2d-info" :class="{ 'nge-2d-info--on': help }" :aria-expanded="help" title="How these work" @click="help = !help">i</button>
+      <button type="button" class="nge-2d-fold" :title="slim ? 'Show everything' : 'Collapse to one row'" :aria-expanded="!slim" @click="slim = !slim">{{ slim ? '▸' : '▾' }}</button>
+      <button v-if="!slim" type="button" class="nge-2d-info" :class="{ 'nge-2d-info--on': help }" :aria-expanded="help" title="How these work" @click="help = !help">i</button>
       <button type="button" class="nge-2d-x" aria-label="Close" @click="twoD.open = false; twoD.lasso = false">×</button>
     </div>
 
-    <div v-if="help" class="nge-2d-help">
-      <p>For working across a misalignment, where the cell jumps between slices.</p>
-      <p><b>Jump pairs:</b> on one side, press <b>+ New pair</b> to save spot A. Scroll to the other side and press <b>Set B</b>. Then <b>⇄</b>, or the <b>J</b> key, takes you across at the same zoom, to the matching place on the other side. <b>A</b> or <b>B</b> goes straight to one side. With <b>Skip</b> on, scrolling into the slices between A and B lands you on the far side, so the bad slices are stepped over. Known bad stretches come ready made, and offer <b>Jump over</b> when you reach them. Click the name to rename it.</p>
-      <p><b>Lasso:</b> press <b>Lasso</b>, pick a color and drag around a shape in the 2D view. It stays on that slice only. Scrolling still changes slices, and Esc stops drawing. Remove a shape with its × chip.</p>
-      <p><b>Compare:</b> press <b>Capture 1</b> on one slice and <b>Capture 2</b> on another. <b>View large</b> shows them side by side, and <b>Download</b> saves both in one picture, lassos included.</p>
-      <p class="nge-2d-small">From an idea and player script by Nseraf, Krzysztof Kruk and annkri. Drag this box by its top.</p>
+    <div v-if="slim" class="nge-2d-row nge-2d-slim">
+      <button type="button" class="nge-2d-btn" title="A new pair, A here (also Capture 1)" @click="slimA">A</button>
+      <button type="button" class="nge-2d-btn" :class="{ 'nge-2d-btn--ask': slimPair && !slimPair.b }" :disabled="!slimPair" title="Set B here (also Capture 2)" @click="slimB">B</button>
+      <button type="button" class="nge-2d-btn nge-2d-btn--go" :disabled="!slimPair?.a || !slimPair?.b" title="Jump to the other side (J)" @click="slimJump">⇄</button>
+      <button type="button" class="nge-2d-btn" :class="{ 'nge-2d-btn--on': twoD.lasso }" :aria-pressed="twoD.lasso" title="Lasso: drag on the 2D view. Esc stops." @click="twoD.lasso = !twoD.lasso">Lasso</button>
+      <button type="button" class="nge-2d-dot nge-2d-dot--on" :style="{ background: twoD.color }" title="Lasso color: click for the next" aria-label="Next lasso color" @click="nextColor"></button>
     </div>
 
-    <section>
+    <div v-if="help && !slim" class="nge-2d-help">
+      <p>For working across a misalignment or other tricky traces across 2D sections.</p>
+      <p><b>Jump pairs:</b> on one side, press <b>+ New pair</b> to save a screencapture of your current 2D spot. Scroll to the other side and press <b>Set B</b>. Then <b>⇄</b>, or the <b>J</b> key, let you jump between the sections.</p>
+      <p>Click <b>Skip</b> to disable sections between A and B while scrolling.<template v-if="stretches.length"> Known bad stretches occur at {{ stretches.join(', ') }} and offer <b>Jump over</b> when you reach them.</template></p>
+      <p><b>Lasso:</b> pick a color and drag around to color a shape in the 2D view screencapture. Remove a shape with <b>×</b>.</p>
+      <p><b>Compare:</b> press <b>Capture 1</b> on one slice and <b>Capture 2</b> on another. <b>View large</b> shows them side by side, and <b>Download</b> saves both in one picture, lassos included.</p>
+      <p class="nge-2d-small">From an idea and player script by Nseraf, Krzysztof Kruk and annkri. Drag this box by its top, and ▾ collapses it to one row.</p>
+    </div>
+
+    <section v-if="!slim">
       <div class="nge-2d-label">Jump pairs</div>
       <div v-for="p in twoD.pairs" :key="p.id" class="nge-2d-pair">
         <input class="nge-2d-name" :value="p.name" maxlength="40" aria-label="Name of this pair" @change="onName(p, $event)" />
@@ -74,7 +92,7 @@ const onName = (p: JumpPair, e: Event) => renamePair(p, (e.target as HTMLInputEl
       <button type="button" class="nge-2d-btn nge-2d-btn--wide" @click="addPair">+ New pair, A here</button>
     </section>
 
-    <section>
+    <section v-if="!slim">
       <div class="nge-2d-label">Lasso</div>
       <div class="nge-2d-row">
         <button type="button" class="nge-2d-btn" :class="{ 'nge-2d-btn--on': twoD.lasso }" :aria-pressed="twoD.lasso" @click="twoD.lasso = !twoD.lasso">{{ twoD.lasso ? 'Drawing: Esc to stop' : 'Lasso' }}</button>
@@ -87,7 +105,7 @@ const onName = (p: JumpPair, e: Event) => renamePair(p, (e.target as HTMLInputEl
       </div>
     </section>
 
-    <section>
+    <section v-if="!slim">
       <div class="nge-2d-label">Compare</div>
       <div class="nge-2d-row">
         <button type="button" class="nge-2d-btn" @click="capture(0)">Capture 1</button>
@@ -120,7 +138,7 @@ const onName = (p: JumpPair, e: Event) => renamePair(p, (e.target as HTMLInputEl
       </div>
     </teleport>
     <div v-if="twoD.note" class="nge-2d-note" role="status">{{ twoD.note }}</div>
-    <div class="nge-2d-small">Kept in this browser, for this dataset.</div>
+    <div v-if="!slim" class="nge-2d-small">Kept in this browser, for this dataset.</div>
   </div>
 </template>
 
@@ -171,9 +189,13 @@ const onName = (p: JumpPair, e: Event) => renamePair(p, (e.target as HTMLInputEl
 .nge-2d-big-shot { flex: 1 1 0; min-width: 0; height: 100%; margin: 0; display: flex; flex-direction: column; justify-content: center; }
 .nge-2d-big-shot img { display: block; max-width: 100%; max-height: calc(100% - 24px); margin: 0 auto; object-fit: contain; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.2); }
 .nge-2d-big-shot figcaption { margin-top: 5px; text-align: center; font: 12px system-ui, sans-serif; color: #9fb4c9; }
-.nge-2d button.nge-2d-info { width: 18px; height: 18px; margin-left: auto; margin-right: 6px; padding: 0; font: italic 700 11px/16px Georgia, serif; color: #7ee0ff; background: none; border: 1px solid rgba(126, 224, 255, 0.55); border-radius: 50%; cursor: pointer; }
+.nge-2d button.nge-2d-info { width: 18px; height: 18px; margin-right: 6px; padding: 0; font: italic 700 11px/16px Georgia, serif; color: #7ee0ff; background: none; border: 1px solid rgba(126, 224, 255, 0.55); border-radius: 50%; cursor: pointer; }
 .nge-2d button.nge-2d-info--on, .nge-2d button.nge-2d-info:hover { color: #05080f; background: #7ee0ff; }
 .nge-2d-help { padding: 6px 0 8px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
 .nge-2d-help p { margin: 0 0 6px; }
+.nge-2d button.nge-2d-fold { margin-left: auto; margin-right: 6px; padding: 0 4px; font-size: 15px; line-height: 1; color: #9fb4c9; background: none; border: 0; cursor: pointer; }
+.nge-2d button.nge-2d-fold:hover { color: #fff; }
+.nge-2d-slim { padding-top: 4px; }
+.nge-2d:has(.nge-2d-slim) { width: auto; }
 .nge-2d-note { margin: 3px 0; color: #ffd24d; }
 </style>
