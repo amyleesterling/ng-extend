@@ -3,12 +3,24 @@ const assert = require('node:assert');
 const bm = require('./blog-mail');
 
 /** A pretend Resend: contacts by email, segments by name, every call logged. */
-function fakeResend({ contacts = {}, segments = {} } = {}) {
+function fakeResend({ contacts = {}, segments = {}, topics = {}, bareTopics = false } = {}) {
   const calls = [];
   let n = 0;
   const resend = async (p, init = {}) => {
     const method = init.method || 'GET';
     calls.push({ method, p, body: init.body });
+    if (p === '/topics?limit=100') return { data: Object.entries(topics).map(([name, id]) => ({ id, name })) };
+    if (p === '/topics' && method === 'POST') { const id = `t${++n}`; topics[init.body.name] = id; return { id }; }
+    const tp = /^\/contacts\/([^/]+)\/topics$/.exec(p);
+    if (tp && method === 'PATCH') {
+      // Resend's docs show both shapes; this fake can insist on the bare one.
+      const list = Array.isArray(init.body) ? init.body : init.body.topics;
+      if (bareTopics && !Array.isArray(init.body)) { const e = new Error('resend 422'); e.status = 422; e.resend = true; throw e; }
+      const c = contacts[decodeURIComponent(tp[1])];
+      c.topics = { ...(c.topics || {}) };
+      for (const t of list) c.topics[t.id] = t.subscription;
+      return {};
+    }
     if (p === '/segments' && method === 'GET') return { data: Object.entries(segments).map(([name, id]) => ({ id, name })) };
     if (p === '/segments' && method === 'POST') { const id = `seg${++n}`; segments[init.body.name] = id; return { id }; }
     let m = /^\/contacts\/([^/]+)$/.exec(p);
@@ -24,7 +36,7 @@ function fakeResend({ contacts = {}, segments = {} } = {}) {
     if (/^\/broadcasts\/[^/]+\/send$/.test(p)) return {};
     throw new Error(`unexpected ${method} ${p}`);
   };
-  return { resend, calls, contacts, segments };
+  return { resend, calls, contacts, segments, topics };
 }
 function io(extra = {}) {
   const f = fakeResend(extra.resendState);
@@ -32,7 +44,7 @@ function io(extra = {}) {
   return {
     f, subs, marks,
     resend: f.resend, cache: {},
-    subscribers: { set: async (e, v) => { subs[e] = { ...subs[e], ...v }; }, update: async (e, v) => { subs[e] = { ...subs[e], ...v }; } },
+    subscribers: { set: async (e, v) => { subs[e] = { ...subs[e], ...v, lists: { ...(subs[e] || {}).lists, ...v.lists } }; } },
     sentPosts: {
       get: async (id) => marks[id] || null,
       set: async (id, v) => { marks[id] = { ...marks[id], ...v }; },
@@ -45,21 +57,48 @@ function io(extra = {}) {
   };
 }
 
-test('subscribe: a new address is added, subscribed, and put in the blog segment', async () => {
+test('subscribe: a new address joins the segment and only the list it asked for', async () => {
   const x = io();
-  const r = await bm.handle('subscribe', { name: 'Kim', email: ' Kim@Example.org ', source: 'home' }, x);
-  assert.deepStrictEqual(r, { ok: true, again: false });
-  assert.strictEqual(x.f.contacts['kim@example.org'].unsubscribed, false);
-  assert.ok(x.f.calls.some((c) => c.p === `/contacts/kim%40example.org/segments/${x.f.segments[bm.SEGMENT]}`));
-  assert.strictEqual(x.subs['kim@example.org'].resend, true);
+  const r = await bm.handle('subscribe', { list: 'news', name: 'Kim', email: ' Kim@Example.org ', source: 'home' }, x);
+  assert.deepStrictEqual(r, { ok: true, list: 'news', again: false });
+  const c = x.f.contacts['kim@example.org'];
+  assert.strictEqual(c.unsubscribed, false);
+  assert.ok(x.f.calls.some((k) => k.p === `/contacts/kim%40example.org/segments/${x.f.segments[bm.SEGMENT]}`));
+  assert.deepStrictEqual(c.topics, { [x.f.topics['Pyr news']]: 'opt_in' }, 'Pyr news only');
+  const made = x.f.calls.filter((k) => k.p === '/topics' && k.method === 'POST').map((k) => k.body);
+  assert.ok(made.every((t) => t.default_subscription === 'opt_out'), 'nobody is on a list by default');
+  assert.strictEqual(x.subs['kim@example.org'].lists.news.resend, true);
 });
 
-test('subscribe: signing up again after an unsubscribe subscribes them again', async () => {
-  const x = io({ resendState: { contacts: { 'kim@example.org': { id: 'c1', email: 'kim@example.org', unsubscribed: true } }, segments: { [bm.SEGMENT]: 's1' } } });
-  const r = await bm.handle('subscribe', { name: 'Kim', email: 'kim@example.org' }, x);
+test('subscribe: the blog form joins the blog list; no list means the blog', async () => {
+  const x = io();
+  await bm.handle('subscribe', { name: 'Kim', email: 'kim@example.org' }, x);
+  assert.deepStrictEqual(x.f.contacts['kim@example.org'].topics, { [x.f.topics['Blog posts']]: 'opt_in' });
+});
+
+test('subscribe: joining a second list keeps the first', async () => {
+  const x = io();
+  await bm.handle('subscribe', { list: 'blog', name: 'Kim', email: 'kim@example.org' }, x);
+  await bm.handle('subscribe', { list: 'news', name: 'Kim', email: 'kim@example.org' }, x);
+  assert.deepStrictEqual(x.f.contacts['kim@example.org'].topics, { [x.f.topics['Blog posts']]: 'opt_in', [x.f.topics['Pyr news']]: 'opt_in' });
+  assert.ok(x.subs['kim@example.org'].lists.blog && x.subs['kim@example.org'].lists.news);
+});
+
+test('subscribe: after unsubscribing from everything, signing up again brings back only that list', async () => {
+  const x = io({ resendState: { contacts: { 'kim@example.org': { id: 'c1', email: 'kim@example.org', unsubscribed: true, topics: { t9: 'opt_in' } } },
+    segments: { [bm.SEGMENT]: 's1' }, topics: { 'Blog posts': 't9', 'Pyr news': 't8' } } });
+  const r = await bm.handle('subscribe', { list: 'news', name: 'Kim', email: 'kim@example.org' }, x);
   assert.strictEqual(r.again, true);
-  assert.strictEqual(x.f.contacts['kim@example.org'].unsubscribed, false);
-  assert.ok(!x.f.calls.some((c) => c.p === '/contacts' && c.method === 'POST'), 'no second contact');
+  const c = x.f.contacts['kim@example.org'];
+  assert.strictEqual(c.unsubscribed, false);
+  assert.deepStrictEqual(c.topics, { t8: 'opt_in', t9: 'opt_out' });
+  assert.ok(!x.f.calls.some((k) => k.p === '/contacts' && k.method === 'POST'), 'no second contact');
+});
+
+test('subscribe: works whichever topics body shape Resend takes', async () => {
+  const x = io({ resendState: { bareTopics: true } });
+  await bm.handle('subscribe', { list: 'news', name: 'Kim', email: 'kim@example.org' }, x);
+  assert.deepStrictEqual(x.f.contacts['kim@example.org'].topics, { [x.f.topics['Pyr news']]: 'opt_in' });
 });
 
 test('subscribe: the bot trap and bad input', async () => {
@@ -74,11 +113,13 @@ test('subscribe: the bot trap and bad input', async () => {
 const POST = { id: 'p1', slug: 'new-post', title: 'A new post', summary: 'Short.', body: 'Hello there.', published_at: '2026-11-06T10:00:00Z' };
 const LIVE_PAGE = { 'https://connectome.quest/blog/new-post/': '<h1>A new post</h1>' };
 
-test('check: nothing goes while LIVE is off', async () => {
-  assert.strictEqual(bm.LIVE, false, 'the deployed code must stay off until Ames says go');
-  const x = io({ posts: [POST], pages: LIVE_PAGE });
-  assert.deepStrictEqual(await bm.handle('check', {}, x), { live: false, sent: [] });
-  assert.strictEqual(x.f.calls.length, 0);
+test('check: posts from before going live are never sent', async () => {
+  const since = Date.parse(bm.LIVE_SINCE);
+  assert.ok(bm.LIVE_SINCE === '__LIVE_SINCE__' || since >= Date.parse('2026-11-06T00:00:00Z'), 'LIVE_SINCE is the moment Ames said go');
+  // Every post on the blog when it went live is older than LIVE_SINCE.
+  const x = io({ posts: [{ ...POST, published_at: '2026-11-05T12:00:00Z' }], pages: LIVE_PAGE });
+  assert.deepStrictEqual((await bm.handle('check', {}, x)).sent, []);
+  assert.ok(!x.f.calls.some((c) => c.p === '/broadcasts'));
 });
 
 test('check: a new post goes once, to the blog segment, only when its page is live', async () => {
@@ -90,6 +131,7 @@ test('check: a new post goes once, to the blog segment, only when its page is li
   assert.deepStrictEqual((await bm.handle('check', {}, x)).sent, ['new-post'], 'old posts never go');
   const b = x.f.calls.find((c) => c.p === '/broadcasts');
   assert.strictEqual(b.body.segment_id, x.f.segments[bm.SEGMENT]);
+  assert.strictEqual(b.body.topic_id, x.f.topics['Blog posts'], 'only to people on the blog list');
   assert.strictEqual(b.body.subject, 'A new post');
   assert.strictEqual(b.body.from, '"Pyr: Map the Brain" <blog@connectome.quest>');
   assert.match(b.body.html, /\{\{\{RESEND_UNSUBSCRIBE_URL\}\}\}/);
@@ -111,6 +153,7 @@ test('test: goes only to the Test segment, and subscribes Ames again', async () 
   assert.strictEqual(b.body.segment_id, x.f.segments[bm.TEST_SEGMENT]);
   assert.notStrictEqual(b.body.segment_id, x.f.segments[bm.SEGMENT]);
   assert.strictEqual(x.f.contacts['amyleerobinson@gmail.com'].unsubscribed, false);
+  assert.strictEqual(x.f.contacts['amyleerobinson@gmail.com'].topics[x.f.topics['Blog posts']], 'opt_in');
   await assert.rejects(bm.handle('test', { slug: 'missing' }, x), { status: 404 });
 });
 

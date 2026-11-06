@@ -1,17 +1,23 @@
 // Blog email for connectome.quest (Ames 2026-11-05: "new blog posts emailed,
 // nicely formatted, to subscribers, with a working unsubscribe").
 //
-// The list lives in Resend (Ames's account): one global contact list, grouped
-// into Segments. A contact must be in a Segment to get a Broadcast, and Resend
-// gives every Broadcast its own one click unsubscribe ({{{RESEND_UNSUBSCRIBE_URL}}})
-// and keeps the unsubscribed list itself. Needs a FULL ACCESS key
-// (RESEND_API_KEY is one, Ames 2026-11-05): a sending only key cannot.
+// The lists live in Resend (Ames's account). Everyone is one contact in one
+// Segment ("connectome.quest"); what they get is a Topic each (Ames
+// 2026-11-05: "There may be a LOT of big posts tho I would like it separate"):
+//   blog  "Blog posts"  every new post, sent here when it is published
+//   news  "Pyr news"    very occasional, only when Ames sends something
+// Topics start opt_out, so only people who said yes get either. Every
+// Broadcast names its Topic, and its unsubscribe link
+// ({{{RESEND_UNSUBSCRIBE_URL}}}) opens Resend's page where a person leaves
+// one Topic or everything. Needs a FULL ACCESS key (RESEND_API_KEY is one,
+// Ames 2026-11-05): a sending only key cannot manage contacts.
 //
 // Actions (index.js ewBlogMail, all public, all from connectome.quest):
-//   subscribe  {name, email, username?, source?, _honey?}  the signup forms.
+//   subscribe  {list: blog|news, name, email, username?, source?, _honey?}
+//              the signup forms (homepage: news; blog pages: blog).
 //   check      {}  the blog build (every 15 minutes) asks: is a post new?
 //              Each post goes once, only after its page is live, and only
-//              posts published after LIVE_SINCE. Nothing goes while LIVE is false.
+//              posts published after LIVE_SINCE.
 //   test       {slug}  the same email, sent only to the Test segment (Ames).
 //
 // Nothing here talks to the network itself: index.js passes in resend(),
@@ -22,15 +28,18 @@ const SITE = 'https://connectome.quest';
 // display name must be quoted, or mail apps misread the address.
 const FROM = '"Pyr: Map the Brain" <blog@connectome.quest>';
 const REPLY_TO = 'support@eyewire.ai';
-const SEGMENT = 'connectome.quest blog';
-const TEST_SEGMENT = 'connectome.quest blog test';
+const SEGMENT = 'connectome.quest';
+const TEST_SEGMENT = 'connectome.quest test';
+const LISTS = {
+  blog: { topic: 'Blog posts', description: 'Every new post on the connectome.quest blog.' },
+  news: { topic: 'Pyr news', description: 'Very occasional news from Pyr: new datasets, events and ways to help.' },
+};
 // Who the Test segment holds (Ames 2026-11-05: a test only to her).
 const TEST_EMAILS = ['amyleerobinson@gmail.com'];
-// Real subscribers get nothing until Ames has seen a test and said go.
-const LIVE = false;
-// Posts published before this are never emailed (set when LIVE turns on), so
-// switching on does not send the old posts.
-const LIVE_SINCE = '2099-01-01T00:00:00Z';
+// Ames said go 2026-11-05. Posts published before LIVE_SINCE are never
+// emailed, so switching on did not send the old posts.
+const LIVE = true;
+const LIVE_SINCE = '2026-11-06T03:04:01Z';
 // Long posts: the opening, up to about this many words, then "Read the rest".
 const EXCERPT_WORDS = 320;
 const WHOLE_POST_WORDS = 600;
@@ -46,31 +55,69 @@ function cleanEmail(v) {
 function cleanText(v, max) {
   return String(v || '').replace(/[\u0000-\u001f\u007f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 }
+const listOf = (v) => (v === 'news' ? 'news' : 'blog');
 
 // ── Resend helpers ────────────────────────────────────────────────────────
 /** A segment's id by name, made the first time it is asked for. */
 async function segmentId(resend, name, cache) {
-  if (cache && cache[name]) return cache[name];
+  const k = 'segment:' + name;
+  if (cache && cache[k]) return cache[k];
   const list = await resend('/segments');
   let seg = (list.data || []).find((s) => s.name === name);
   if (!seg) seg = await resend('/segments', { method: 'POST', body: { name } });
-  if (cache) cache[name] = seg.id;
+  if (cache) cache[k] = seg.id;
   return seg.id;
 }
 
-/** Add or update a contact, subscribed, and put it in the segment. */
-async function upsertContact(resend, { email, name }, segId) {
+/** A list's Topic id, made the first time it is asked for: opt_out, so only
+ *  people who said yes get it, and public, so the unsubscribe page shows
+ *  both lists to everyone. */
+async function topicId(resend, list, cache) {
+  const { topic, description } = LISTS[list];
+  const k = 'topic:' + topic;
+  if (cache && cache[k]) return cache[k];
+  const all = await resend('/topics?limit=100');
+  let t = (all.data || []).find((x) => x.name === topic);
+  if (!t) t = await resend('/topics', { method: 'POST', body: { name: topic, description, default_subscription: 'opt_out', visibility: 'public' } });
+  if (cache) cache[k] = t.id;
+  return t.id;
+}
+
+/** Set some of a contact's Topics. The docs show the body both wrapped
+ *  ({topics: [...]}) and bare ([...]); try the first, then the second. */
+async function setTopics(resend, email, topics) {
+  const p = `/contacts/${encodeURIComponent(email)}/topics`;
+  try { await resend(p, { method: 'PATCH', body: { topics } }); }
+  catch (e) {
+    if (![400, 422].includes(e.status)) throw e;
+    await resend(p, { method: 'PATCH', body: topics });
+  }
+}
+
+/** Add or update a contact, in the segment, opted in to this list. Someone
+ *  who had unsubscribed from everything and signs up again gets only the
+ *  list they asked for now. */
+async function upsertContact(io, { email, name }, segName, list) {
+  const resend = io.resend;
+  const segId = await segmentId(resend, segName, io.cache);
+  const want = await topicId(resend, list, io.cache);
   let existing = null;
   try { existing = await resend(`/contacts/${encodeURIComponent(email)}`); }
   catch (e) { if (e.status !== 404) throw e; }
+  // Read before the PATCH below turns it off.
+  const wasOff = !!(existing && existing.unsubscribed);
   if (existing && existing.id) {
-    // Signing up again means they want it again, even after an unsubscribe.
     await resend(`/contacts/${encodeURIComponent(email)}`, { method: 'PATCH',
       body: { unsubscribed: false, ...(name ? { first_name: name } : {}) } });
   } else {
     await resend('/contacts', { method: 'POST', body: { email, first_name: name || '', unsubscribed: false } });
   }
   await resend(`/contacts/${encodeURIComponent(email)}/segments/${segId}`, { method: 'POST' });
+  const topics = [{ id: want, subscription: 'opt_in' }];
+  if (wasOff) {
+    for (const other of Object.keys(LISTS)) if (other !== list) topics.push({ id: await topicId(resend, other, io.cache), subscription: 'opt_out' });
+  }
+  await setTopics(resend, email, topics);
   return existing && existing.id ? 'again' : 'new';
 }
 
@@ -81,14 +128,17 @@ async function subscribe(a, io) {
   const email = cleanEmail(a.email);
   const name = cleanText(a.name, 80);
   if (!name) fail(400, 'Please add your name.');
-  const username = cleanText(a.username, 60);
-  const source = ['home', 'blog'].includes(a.source) ? a.source : 'other';
-  // Our own copy first, so a Resend outage loses nobody.
-  await io.subscribers.set(email, { email, name, username, source, at: new Date().toISOString(), resend: false });
-  const segId = await segmentId(io.resend, SEGMENT, io.cache);
-  const kind = await upsertContact(io.resend, { email, name }, segId);
-  await io.subscribers.update(email, { resend: true });
-  return { ok: true, again: kind === 'again' };
+  return addToList(io, { email, name, username: cleanText(a.username, 60), list: listOf(a.list), source: cleanText(a.source, 20) || 'other' });
+}
+
+/** Put a person on a list: our own copy first (so a Resend outage loses
+ *  nobody), then Resend. Pyr's own sign ups (index.js) come here too. */
+async function addToList(io, { email, name, username, list, source }) {
+  const at = new Date().toISOString();
+  await io.subscribers.set(email, { email, name, ...(username ? { username } : {}), lists: { [list]: { at, source, resend: false } } });
+  const kind = await upsertContact(io, { email, name }, SEGMENT, list);
+  await io.subscribers.set(email, { lists: { [list]: { resend: true } } });
+  return { ok: true, list, again: kind === 'again' };
 }
 
 // ── The email ─────────────────────────────────────────────────────────────
@@ -231,8 +281,9 @@ async function broadcast(io, post, segName, label) {
   const render = await io.renderer();
   const msg = postEmail(post, render);
   const segment_id = await segmentId(io.resend, segName, io.cache);
+  const topic_id = await topicId(io.resend, 'blog', io.cache);
   const b = await io.resend('/broadcasts', { method: 'POST', body: {
-    segment_id, from: FROM, reply_to: REPLY_TO, subject: msg.subject, html: msg.html, text: msg.text,
+    segment_id, topic_id, from: FROM, reply_to: REPLY_TO, subject: msg.subject, html: msg.html, text: msg.text,
     name: `${label}: ${String(post.title).slice(0, 80)}` } });
   await io.resend(`/broadcasts/${b.id}/send`, { method: 'POST' });
   return b.id;
@@ -272,10 +323,9 @@ async function test(a, io) {
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) fail(400, 'Which post?');
   const post = (await io.posts()).find((p) => p.slug === slug);
   if (!post) fail(404, 'No published post has that address.');
-  const segId = await segmentId(io.resend, TEST_SEGMENT, io.cache);
   // Ames may have tried the Unsubscribe link in the last test: a new test
   // subscribes her again, or it would never arrive.
-  for (const email of TEST_EMAILS) await upsertContact(io.resend, { email, name: 'Ames' }, segId);
+  for (const email of TEST_EMAILS) await upsertContact(io, { email, name: 'Ames' }, TEST_SEGMENT, 'blog');
   return { ok: true, broadcast: await broadcast(io, post, TEST_SEGMENT, 'TEST') };
 }
 
@@ -286,4 +336,4 @@ async function handle(action, a, io) {
   fail(400, 'Unknown action.');
 }
 
-module.exports = { handle, postEmail, emailBody, excerpt, cleanEmail, LIVE, LIVE_SINCE, SEGMENT, TEST_SEGMENT };
+module.exports = { handle, addToList, postEmail, emailBody, excerpt, cleanEmail, LIVE, LIVE_SINCE, SEGMENT, TEST_SEGMENT, LISTS };
