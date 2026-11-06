@@ -91,6 +91,7 @@ test('check: a new post goes once, to the blog segment, only when its page is li
   const b = x.f.calls.find((c) => c.p === '/broadcasts');
   assert.strictEqual(b.body.segment_id, x.f.segments[bm.SEGMENT]);
   assert.strictEqual(b.body.subject, 'A new post');
+  assert.strictEqual(b.body.from, '"Pyr: Map the Brain" <blog@connectome.quest>');
   assert.match(b.body.html, /\{\{\{RESEND_UNSUBSCRIBE_URL\}\}\}/);
   assert.match(b.body.html, /href="https:\/\/connectome\.quest\/blog\/new-post\/"/);
   assert.deepStrictEqual((await bm.handle('check', {}, x)).sent, [], 'never twice');

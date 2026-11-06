@@ -18,7 +18,9 @@
 // posts(), page(), renderer() and the Firestore stores, so the tests can too.
 
 const SITE = 'https://connectome.quest';
-const FROM = 'Map the Brain <blog@connectome.quest>';
+// Ames 2026-11-05: "Let's make it from Pyr: Map the Brain". A colon in a
+// display name must be quoted, or mail apps misread the address.
+const FROM = '"Pyr: Map the Brain" <blog@connectome.quest>';
 const REPLY_TO = 'support@eyewire.ai';
 const SEGMENT = 'connectome.quest blog';
 const TEST_SEGMENT = 'connectome.quest blog test';
