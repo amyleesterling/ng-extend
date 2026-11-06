@@ -15,6 +15,7 @@ import { useLoginStore, useProofreadingBackendStore } from '../store';
 import { secureWrite } from '../secure_write';
 import { runPanelTrace } from '../util/holo_trace';
 import { betaGate } from '../beta_gate';
+import { answerNews } from '../pyr_news';
 
 const SUPPORT = 'support@eyewire.ai';
 const backend = useProofreadingBackendStore();
@@ -30,6 +31,8 @@ const note = ref('');
 // Both optional (Ames 2026-10-26: "eyewire username, Eyewire rank").
 const ewName = ref('');
 const ewRank = ref('');
+// Pyr news by email, unticked (Ames 2026-11-05: "unticked by default").
+const wantNews = ref(false);
 const sending = ref(false);
 const error = ref('');
 const panelEl = ref<HTMLElement | null>(null);
@@ -81,6 +84,8 @@ async function request() {
     const r = await secureWrite<{ invited?: boolean; requested?: boolean }>('access.beta', {
       name: name.value.trim(), email: email.value.trim(), note: note.value.trim() || undefined,
       eyewireUsername: ewName.value.trim() || undefined, eyewireRank: ewRank.value.trim() || undefined });
+    // The request went; the news answer is extra and never stops it.
+    if (wantNews.value) answerNews(true, 'beta', name.value.trim()).catch(() => { /* Settings can still add them */ });
     if (r?.invited) { show.value = false; betaGate.value = 'in'; return; }
     requested.value = true;
   } catch (e: any) {
@@ -193,6 +198,10 @@ onUnmounted(() => window.clearInterval(waitCheck));
           <label class="nge-beta-label" for="nge-beta-note">Anything you'd like us to know? <span>(optional)</span></label>
           <textarea id="nge-beta-note" v-model="note" class="nge-beta-note" rows="2" maxlength="500"
                     placeholder="Where you heard about Pyr"></textarea>
+          <label class="nge-beta-news">
+            <input type="checkbox" v-model="wantNews" />
+            <span>Send me very occasional news from Pyr by email. We'll never share your information.</span>
+          </label>
           <button class="nge-beta-btn" :disabled="sending" @click="request">{{ sending ? 'Sending...' : 'Request beta access' }}</button>
           <p v-if="error" class="nge-beta-error" role="alert">{{ error }}</p>
         </template>
@@ -328,6 +337,8 @@ onUnmounted(() => window.clearInterval(waitCheck));
 .nge-beta-invite-done span { color: #7ee0ff; font-weight: 700; margin-right: 4px; }
 @media (max-width: 420px) { .nge-beta-invite-row { flex-direction: column; align-items: stretch; } .nge-beta-btn--small { width: 100%; } }
 .nge-beta-error { margin: 10px 0 0; font-size: 13px; color: #ff9a9a; }
+.nge-beta-news { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 2px; font-size: 13px; line-height: 1.45; color: rgba(200, 220, 245, 0.85); cursor: pointer; }
+.nge-beta-news input { width: 16px; height: 16px; margin: 1px 0 0; flex: none; accent-color: #4fcfff; }
 .nge-beta-foot {
   margin: 20px 0 0; padding-top: 14px;
   border-top: 1px solid rgba(79, 207, 255, 0.15);

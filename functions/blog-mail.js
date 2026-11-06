@@ -19,6 +19,16 @@
 //              Each post goes once, only after its page is live, and only
 //              posts published after LIVE_SINCE.
 //   test       {slug}  the same email, sent only to the Test segment (Ames).
+//   news.link  {e, t}  the "Yes, add me" link in Pyr's "You're in" email.
+// Signed in Pyr players (index.js checks their sign in, then calls newsStatus,
+// newsAnswer and newsBell with their email):
+//   news.status   are they on Pyr news, and have they answered?
+//   news.answer   {yes, from}  the first visit card, the Five Days bell, the
+//                 beta request box, or the Settings switch (only Settings
+//                 can take someone off).
+//   news.bell     after the Five Days Achievement: one bell, a few minutes
+//                 later, to someone who has not answered (Ames 2026-11-05:
+//                 "offset the bell from the achievement by a few mins").
 //
 // Nothing here talks to the network itself: index.js passes in resend(),
 // posts(), page(), renderer() and the Firestore stores, so the tests can too.
@@ -333,7 +343,86 @@ async function handle(action, a, io) {
   if (action === 'subscribe') return subscribe(a || {}, io);
   if (action === 'check') return check(a || {}, io);
   if (action === 'test') return test(a || {}, io);
+  if (action === 'news.link') return newsLink(a || {}, io);
   fail(400, 'Unknown action.');
 }
 
-module.exports = { handle, addToList, postEmail, emailBody, excerpt, cleanEmail, LIVE, LIVE_SINCE, SEGMENT, TEST_SEGMENT, LISTS };
+// ── Pyr news, from inside Pyr (Ames 2026-11-05) ─────────────────────────
+// Asked, never assumed: invited players gave us their address to get in, not
+// for news. Each person answers once (io.newsAnswers, Firestore), and the
+// answer is kept by email.
+const NEWS_BELL_TITLE = '📬 Pyr news by email?';
+const NEWS_BELL_BODY = "Would you like very occasional news from Pyr by email? New datasets, events and ways to help. We'll never share your information.\n\n#nge-pyr-news";
+const NEWS_BELL_DELAY_MS = 4 * 60000;
+const NEWS_FROM = ['card', 'bell', 'beta', 'settings'];
+
+/** Is this person on Pyr news in Resend? Their answer in Pyr can be stale:
+ *  they may have used an email's unsubscribe link since. */
+async function onNewsList(io, email) {
+  let c;
+  try { c = await io.resend(`/contacts/${encodeURIComponent(email)}`); }
+  catch (e) { if (e.status === 404) return false; throw e; }
+  if (!c || c.unsubscribed) return false;
+  const want = await topicId(io.resend, 'news', io.cache);
+  const t = await io.resend(`/contacts/${encodeURIComponent(email)}/topics?limit=100`);
+  return (t.data || []).some((x) => x.id === want && x.subscription === 'opt_in');
+}
+
+async function newsStatus(io, { email }) {
+  const mark = await io.newsAnswers.get(email);
+  return { answer: (mark && mark.answer) || null, onList: await onNewsList(io, email) };
+}
+
+async function newsAnswer(io, { email, name, yes, from }) {
+  if (!NEWS_FROM.includes(from)) fail(400, 'Unknown place.');
+  const at = new Date().toISOString();
+  if (yes) {
+    await addToList(io, { email, name: cleanText(name, 80), list: 'news', source: 'pyr-' + from });
+  } else if (from === 'settings') {
+    // Only the Settings switch takes someone off. "No thanks" on a card
+    // keeps whatever they chose elsewhere (the homepage form, say).
+    let c = null;
+    try { c = await io.resend(`/contacts/${encodeURIComponent(email)}`); } catch (e) { if (e.status !== 404) throw e; }
+    if (c && c.id) await setTopics(io.resend, email, [{ id: await topicId(io.resend, 'news', io.cache), subscription: 'opt_out' }]);
+    await io.subscribers.set(email, { lists: { news: { off: at } } });
+  }
+  await io.newsAnswers.set(email, { answer: yes ? 'yes' : 'no', from, at });
+  return { answer: yes ? 'yes' : 'no', onList: !!yes || (from === 'settings' ? false : await onNewsList(io, email)) };
+}
+
+/** The Five Days bell, once, to someone who never answered and is not on
+ *  the list already. io.bell(title, body, sendAt) writes it. */
+async function newsBell(io, { email }) {
+  const mark = await io.newsAnswers.get(email);
+  if (mark && (mark.answer || mark.bellAt)) return { bell: false };
+  if (await onNewsList(io, email)) return { bell: false };
+  const sendAt = new Date(Date.now() + NEWS_BELL_DELAY_MS).toISOString();
+  await io.newsAnswers.set(email, { bellAt: sendAt });
+  await io.bell(NEWS_BELL_TITLE, NEWS_BELL_BODY, sendAt);
+  return { bell: true, sendAt };
+}
+
+// The one click link in the "You're in" email: the address and a signature
+// only this server can make, so nobody can sign up someone else with it.
+const b64url = (str) => Buffer.from(str, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64url = (str) => Buffer.from(String(str).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+function linkSig(email, key) {
+  return require('crypto').createHmac('sha256', String(key) + ':pyr-news-link').update(email).digest('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, 22);
+}
+function newsLinkUrl(email, key) {
+  const e = cleanEmail(email);
+  return `${SITE}/news/?e=${b64url(e)}&t=${linkSig(e, key)}`;
+}
+async function newsLink(a, io) {
+  let email;
+  try { email = cleanEmail(unb64url(a.e)); } catch (e) { fail(400, 'This link is not complete. Please copy the whole link from the email.'); }
+  const want = linkSig(email, io.linkKey);
+  const got = String(a.t || '');
+  if (got.length !== want.length || !require('crypto').timingSafeEqual(Buffer.from(got), Buffer.from(want))) fail(400, 'This link is not complete. Please copy the whole link from the email.');
+  await addToList(io, { email, name: '', list: 'news', source: 'invite-link' });
+  await io.newsAnswers.set(email, { answer: 'yes', from: 'link', at: new Date().toISOString() });
+  return { ok: true, list: 'news' };
+}
+
+module.exports = { newsStatus, newsAnswer, newsBell, newsLinkUrl, NEWS_BELL_TITLE, handle, addToList, postEmail, emailBody, excerpt, cleanEmail, LIVE, LIVE_SINCE, SEGMENT, TEST_SEGMENT, LISTS };

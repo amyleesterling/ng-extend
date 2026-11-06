@@ -40,9 +40,9 @@ function fakeResend({ contacts = {}, segments = {}, topics = {}, bareTopics = fa
 }
 function io(extra = {}) {
   const f = fakeResend(extra.resendState);
-  const subs = {}, marks = {};
+  const subs = {}, marks = {}, news = {};
   return {
-    f, subs, marks,
+    f, subs, marks, news,
     resend: f.resend, cache: {},
     subscribers: { set: async (e, v) => { subs[e] = { ...subs[e], ...v, lists: { ...(subs[e] || {}).lists, ...v.lists } }; } },
     sentPosts: {
@@ -53,6 +53,8 @@ function io(extra = {}) {
     posts: async () => extra.posts || [],
     page: async (url) => (extra.pages || {})[url] || null,
     renderer: async () => (md) => md.split(/\n\n+/).map((b) => `<p>${b}</p>`).join('\n'),
+    newsAnswers: { get: async (e) => news[e] || null, set: async (e, v) => { news[e] = { ...news[e], ...v }; } },
+    linkKey: 'test-key',
     ...extra.io,
   };
 }
@@ -178,4 +180,59 @@ test('excerpt: short posts go whole; long ones stop at a block, never inside cod
   assert.strictEqual(cut, true);
   assert.strictEqual((md.match(/```/g) || []).length % 2, 0, 'a code fence is never cut in half');
   assert.doesNotMatch(md, /## Heading\s*$/, 'never ends on a heading');
+});
+
+// ── Pyr news from inside Pyr ──────────────────────────────────────────────
+const NEWS = () => io({ resendState: { topics: { 'Blog posts': 'tb', 'Pyr news': 'tn' } } });
+
+test('news: Yes adds them to Pyr news only; No thanks on a card takes nobody off', async () => {
+  const x = NEWS();
+  assert.deepStrictEqual(await bm.newsStatus(x, { email: 'kim@example.org' }), { answer: null, onList: false });
+  x.f.contacts['kim@example.org'] = { id: 'c1', email: 'kim@example.org', unsubscribed: false, topics: {} };
+  // The fake answers topic reads from the contact.
+  const r0 = x.resend;
+  x.resend = async (p, init) => {
+    const m = /^\/contacts\/([^/]+)\/topics\?limit=100$/.exec(p);
+    if (m) { const c = x.f.contacts[decodeURIComponent(m[1])]; return { data: Object.entries((c && c.topics) || {}).map(([id, subscription]) => ({ id, subscription })) }; }
+    return r0(p, init);
+  };
+  assert.deepStrictEqual(await bm.newsAnswer(x, { email: 'kim@example.org', name: 'Kim', yes: true, from: 'card' }), { answer: 'yes', onList: true });
+  assert.deepStrictEqual(x.f.contacts['kim@example.org'].topics, { tn: 'opt_in' });
+  await bm.newsAnswer(x, { email: 'kim@example.org', yes: false, from: 'bell' });
+  assert.strictEqual(x.f.contacts['kim@example.org'].topics.tn, 'opt_in', 'a No thanks never unsubscribes');
+  assert.strictEqual(x.news['kim@example.org'].answer, 'no');
+  await bm.newsAnswer(x, { email: 'kim@example.org', yes: false, from: 'settings' });
+  assert.strictEqual(x.f.contacts['kim@example.org'].topics.tn, 'opt_out', 'the Settings switch does');
+  await assert.rejects(bm.newsAnswer(x, { email: 'kim@example.org', yes: true, from: 'elsewhere' }), { status: 400 });
+});
+
+test('news: the Five Days bell goes once, minutes later, and never to someone who answered', async () => {
+  const x = NEWS();
+  const bells = [];
+  x.bell = async (title, body, sendAt) => { bells.push({ title, body, sendAt }); };
+  const before = Date.now();
+  assert.strictEqual((await bm.newsBell(x, { email: 'kim@example.org' })).bell, true);
+  assert.strictEqual(bells.length, 1);
+  assert.strictEqual(bells[0].title, bm.NEWS_BELL_TITLE);
+  assert.match(bells[0].body, /#nge-pyr-news/);
+  assert.match(bells[0].body, /never share your information/);
+  assert.ok(Date.parse(bells[0].sendAt) - before >= 3 * 60000, 'a few minutes after the Achievement');
+  assert.strictEqual((await bm.newsBell(x, { email: 'kim@example.org' })).bell, false, 'once');
+  x.news['sam@example.org'] = { answer: 'no' };
+  assert.strictEqual((await bm.newsBell(x, { email: 'sam@example.org' })).bell, false, 'answered already');
+  assert.strictEqual(bells.length, 1);
+});
+
+test('news: the email link adds exactly that address, and a changed link is refused', async () => {
+  const x = NEWS();
+  const url = new URL(bm.newsLinkUrl('Kim@Example.org', 'test-key'));
+  assert.strictEqual(url.origin + url.pathname, 'https://connectome.quest/news/');
+  const e = url.searchParams.get('e'), t = url.searchParams.get('t');
+  assert.deepStrictEqual(await bm.handle('news.link', { e, t }, x), { ok: true, list: 'news' });
+  assert.deepStrictEqual(x.f.contacts['kim@example.org'].topics, { tn: 'opt_in' });
+  const other = Buffer.from('mallory@example.org').toString('base64url');
+  await assert.rejects(bm.handle('news.link', { e: other, t }, x), { status: 400 });
+  await assert.rejects(bm.handle('news.link', { e, t: t.slice(0, -1) + (t.endsWith('A') ? 'B' : 'A') }, x), { status: 400 });
+  await assert.rejects(bm.handle('news.link', { e: 'junk', t: '' }, x), { status: 400 });
+  assert.ok(!x.f.contacts['mallory@example.org']);
 });

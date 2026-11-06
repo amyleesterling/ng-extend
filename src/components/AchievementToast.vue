@@ -21,6 +21,7 @@ import { runPanelTrace } from '../util/holo_trace';
 import { celebrationCellCounts } from '../util/dataset_contribution';
 import pyrIcon from '../../static/badges/pyr/pyr-icon.png';
 import { isAwardTitle } from '../util/award_title';
+import { askAfterFiveDays } from '../pyr_news';
 
 const statsStore = useUserStatsStore();
 const { stats } = storeToRefs(statsStore);
@@ -291,6 +292,9 @@ function settleLoyalty(days: number) {
   // Test build: show the card, save nothing (see LOYALTY_TEST_ONLY).
   if (!LOYALTY_TEST_ONLY) for (const b of due) backend.recordBadgeAward('loyalty', b.id);
   if (!fresh.length) return;
+  // Five Days: a bell a few minutes later asks about Pyr news, once, if they
+  // never answered (Ames 2026-11-05). The server sets the delay.
+  if (!LOYALTY_TEST_ONLY && fresh.some(b => b.threshold === 5)) askAfterFiveDays();
   const top = due[due.length - 1];
   // Chat says so too, for the highest one only (the server checks the days
   // and writes the line once).

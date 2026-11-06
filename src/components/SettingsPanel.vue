@@ -12,6 +12,7 @@ import { startViewHash } from '../util/start_view';
 import { automaticRegion, imageRegionLabel } from '../util/image_source';
 import { ngePointGem } from 'neuroglancer/annotation/point';
 import { ngeHoverStyle } from 'neuroglancer/segmentation_display_state/frontend';
+import { newsStatus, answerNews } from '../pyr_news';
 
 const prefsStore = useUserPreferencesStore();
 
@@ -25,6 +26,29 @@ const backendStore = useProofreadingBackendStore();
 // always-live text field in this panel.
 
 /** Open the username dialog (the same one shown after Tutorial 1). */
+// Pyr news by email (Ames 2026-11-05): saved the moment it is switched, not
+// with Save, because it is the email list itself, not a setting in Pyr.
+const newsOn = ref(false);
+const newsKnown = ref(false);
+const newsBusy = ref(false);
+const newsNote = ref('');
+onMounted(async () => {
+  try { newsOn.value = (await newsStatus(true)).onList; newsKnown.value = true; } catch { /* the switch stays hidden */ }
+});
+async function toggleNews(e: Event) {
+  const want = (e.target as HTMLInputElement).checked;
+  newsBusy.value = true; newsNote.value = '';
+  try {
+    newsOn.value = (await answerNews(want, 'settings')).onList;
+    newsNote.value = newsOn.value ? "You're on the list." : "You're off the list.";
+  } catch (err: any) {
+    newsOn.value = !want;
+    newsNote.value = err?.message || 'That did not go through. Please try again.';
+  } finally {
+    newsBusy.value = false;
+  }
+}
+
 function openUsernameDialog() {
   document.dispatchEvent(new CustomEvent('nge:prompt-username', { detail: { force: true } }));
 }
@@ -651,6 +675,10 @@ const props = defineProps<{ embedded?: boolean }>();
             <label class="nge-settings-toggle" title="Today in Pyr is the short note each afternoon on what changed in Pyr that day. Off: it no longer comes to your bell. Other announcements still do.">
               <input type="checkbox" v-model="draftDailyDigest" />
               <span class="nge-settings-toggle-label">Show Today in Pyr daily updates</span>
+            </label>
+            <label v-if="newsKnown" class="nge-settings-toggle" title="Very occasional news from Pyr by email: new datasets, events and ways to help. Sent to the email you sign in with. We'll never share your information. This one saves as soon as you switch it.">
+              <input type="checkbox" :checked="newsOn" :disabled="newsBusy" @change="toggleNews" />
+              <span class="nge-settings-toggle-label">Pyr news by email <span v-if="newsNote" class="nge-settings-news-note">{{ newsNote }}</span></span>
             </label>
             <label class="nge-settings-toggle" title="On: a small burst of particles where your point lands, when you place a Highlight, Tag, cut, merge or Find Path point. Off: the points go down with no particles.">
               <input type="checkbox" v-model="draftParticles" />
@@ -1517,6 +1545,7 @@ const props = defineProps<{ embedded?: boolean }>();
   outline: 1px solid rgba(74, 158, 255, 0.7);
   outline-offset: 2px;
 }
+.nge-settings-news-note { margin-left: 8px; font-size: 12px; color: #9fe3b4; }
 .nge-settings-toggle-label {
   user-select: none;
 }

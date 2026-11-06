@@ -8,6 +8,7 @@ import { useProofreadingBackendStore, useHelpRequestStore, useUserPreferencesSto
 import { isQuestReview, reviewSegment, reviewLinkIn, getReview, replyToReview, type ReviewState } from '../quest_review';
 import { QUEST_DATASET } from '../annotation_quests';
 import { secureWrite } from '../secure_write';
+import { NEWS_MARK, answerNews } from '../pyr_news';
 import { mintShortStateLink } from '../util/state_link';
 import { openStartLink } from '../util/start_link';
 import { recapWeekStart, recapMonth, recapYear, weekFromRecapTitle, monthFromRecapTitle, yearFromRecapTitle } from '../util/recap_week';
@@ -550,6 +551,24 @@ async function markReminderSolved(id: string) {
  *  view, the helper's from their latest reply or else the one the request
  *  was asked from. */
 const reminderId = computed(() => String(openNotif.value?.body ?? '').match(/#nge-help-solved=([0-9a-f-]{1,40})/i)?.[1] ?? '');
+/** The Pyr news bell (Ames 2026-11-05), a few minutes after Five Days: two
+ *  buttons, and the answer is final either way. */
+const newsAsk = computed(() => NEWS_MARK.test(String(openNotif.value?.body ?? '')));
+const newsBusy = ref(false);
+const newsNote = ref('');
+watch(newsAsk, () => { newsNote.value = ''; });
+async function answerNewsBell(yes: boolean) {
+  if (newsBusy.value) return;
+  newsBusy.value = true; newsNote.value = '';
+  try {
+    await answerNews(yes, 'bell');
+    newsNote.value = yes ? "You're on the list! You can change this any time in Settings." : "No problem. It's in Settings if you change your mind.";
+  } catch (e: any) {
+    newsNote.value = e?.message || 'That did not go through. Please try again.';
+  } finally {
+    newsBusy.value = false;
+  }
+}
 const reminderReq = ref<any>(null);
 watch(reminderId, async id => {
   reminderReq.value = null;
@@ -882,6 +901,8 @@ function plainText(text: string): string {
 function cleanCopy(text: string): string {
   if (!text) return '';
   return String(text)
+    // The Pyr news bell's marker: its buttons, not words (pyr_news.ts).
+    .replace(NEWS_MARK, '')
     // Achievement notes carry no emoji, and say Achievement (Ames 2026-10-27: "we don't need emoji in the
     // achievement text"); older ones are cleaned here, including "award! — description" (a stray comma once dashes go).
     .replace(/^\s*(?:\p{Extended_Pictographic}\uFE0F?\s*)+(?=New Achievement)/u, '')
@@ -1430,6 +1451,13 @@ function padRank(rank: number): string {
                 </div>
                 <div v-if="triageReportId" class="nge-notif-reminder-actions">
                   <button class="nge-notif-open-help" @click="openTriageReport">Open this report in triage ↗</button>
+                </div>
+                <div v-if="newsAsk" class="nge-notif-reminder-actions">
+                  <template v-if="!newsNote || newsBusy">
+                    <button class="nge-notif-open-help nge-notif-solve" :disabled="newsBusy" @click="answerNewsBell(true)">{{ newsBusy ? 'Adding…' : 'Yes, add me' }}</button>
+                    <button class="nge-notif-open-help" :disabled="newsBusy" @click="answerNewsBell(false)">No thanks</button>
+                  </template>
+                  <p v-else class="nge-notif-news-note" role="status">{{ newsNote }}</p>
                 </div>
                 <div v-if="reminderId" class="nge-notif-reminder-actions">
                   <button class="nge-notif-open-help nge-notif-solve" :disabled="!!reminderReq?.resolved || helpSolvedNote.startsWith('Marked solved')"
@@ -2379,6 +2407,7 @@ span.nge-notif-reply-part { cursor: default; }
   font-size: 14px;
 }
 .nge-notif-reminder-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.nge-notif-news-note { margin: 0; color: #9fe3b4; font-size: 14px; }
 .nge-notif-solve:disabled { opacity: 0.6; cursor: default; }
 .nge-notif-open-help {
   margin-top: 16px;

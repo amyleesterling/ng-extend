@@ -238,3 +238,15 @@ test('letting someone in emails them once, from connectome.quest', async () => {
   await assert.rejects(handle('access.welcomeEmail', { email: 'x@y.org' }, { ...io, isAdmin: false }));
   assert.deepEqual(await handle('access.welcomeEmail', { email: 'z@y.org' }, { isAdmin: true }), { sent: false, reason: 'not set up' });
 });
+
+test('the "You\'re in" email offers Pyr news with its one click link, and is fine without one', async () => {
+  const sent = [];
+  const io = { isAdmin: true, who: { email: 'ames@x.org' }, sendEmail: async m => { sent.push(m); return { ok: true, id: 'e1' }; },
+    newsLink: e => `https://connectome.quest/news/?e=${e}&t=sig` };
+  await handle('access.welcomeEmail', { email: 'ryan@example.org', name: 'Ryan' }, io);
+  assert.match(sent[0].text, /very occasional news from Pyr/);
+  assert.match(sent[0].text, /https:\/\/connectome\.quest\/news\/\?e=ryan@example\.org&t=sig/);
+  assert.match(sent[0].text, /never share your information/);
+  await handle('access.welcomeEmail', { email: 'sam@example.org', name: 'Sam' }, { ...io, newsLink: () => { throw new Error('no key'); } });
+  assert.doesNotMatch(sent[1].text, /news from Pyr/, 'a broken link maker never stops the welcome');
+});

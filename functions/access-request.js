@@ -638,9 +638,11 @@ const BETA_MARKS = ['listed', 'removed', 'waiting'];
 // a second Let in sends nothing (io.welcomeSent, Firestore in index.js).
 const WELCOME_FROM = 'Pyr <welcome@connectome.quest>';
 const WELCOME_REPLY_TO = 'support@eyewire.ai';
-function welcomeMessage(name, email) {
+function welcomeMessage(name, email, newsLink) {
   const first = String(name || '').trim().split(/\s+/)[0] || 'there';
-  const text = `Hi ${first},\n\nYou're in! Thanks for asking to map the brain with us. Sign in to Pyr with this email address (${email}) here:\n\nhttps://connectome.quest/play/\n\nThe Pyr (pronounced "peer") team at Princeton University`;
+  // Pyr news is asked, never assumed (Ames 2026-11-05): one click joins it.
+  const news = newsLink ? `\n\nWould you like very occasional news from Pyr by email? New datasets, events and ways to help. One click adds you, and we'll never share your information:\n\n${newsLink}` : '';
+  const text = `Hi ${first},\n\nYou're in! Thanks for asking to map the brain with us. Sign in to Pyr with this email address (${email}) here:\n\nhttps://connectome.quest/play/${news}\n\nThe Pyr (pronounced "peer") team at Princeton University`;
   return { from: WELCOME_FROM, to: [email], reply_to: WELCOME_REPLY_TO, subject: "You're in: Pyr early access", text };
 }
 async function welcomeEmail(a, io) {
@@ -649,7 +651,9 @@ async function welcomeEmail(a, io) {
   const name = cleanText(a.name, BETA_NAME_MAX, 'The name') || '';
   if (!io.sendEmail) return {sent: false, reason: 'not set up'};
   if (io.welcomeSent && await io.welcomeSent.get(email)) return {sent: false, reason: 'already sent'};
-  const r = await io.sendEmail(welcomeMessage(name, email));
+  let link = '';
+  try { link = io.newsLink ? io.newsLink(email) : ''; } catch (e) { link = ''; }
+  const r = await io.sendEmail(welcomeMessage(name, email, link));
   if (!r || !r.ok) fail(502, `The email did not go${r && r.error ? `: ${r.error}` : ''}. They are still let in.`);
   if (io.welcomeSent) await io.welcomeSent.set(email, {at: new Date().toISOString(), by: (io.who && io.who.email) || '', id: r.id || ''});
   return {sent: true};

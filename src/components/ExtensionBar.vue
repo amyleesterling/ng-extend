@@ -53,6 +53,8 @@ import { huntState, loadHunts, featuredHunt, phaseNow, countdown, takeHuntAfterS
 import DatasetSelectorPanel from "components/DatasetSelectorPanel.vue";
 import BetaGate from "components/BetaGate.vue";
 import PrinciplesGate from "components/PrinciplesGate.vue";
+// Pyr news by email, asked once on a first visit (Ames 2026-11-05).
+import PyrNewsCard from "components/PyrNewsCard.vue";
 import { betaGate } from "../beta_gate";
 import ScreenshotDialog from "components/ScreenshotDialog.vue";
 import StreakChip from "components/StreakChip.vue";
@@ -1279,6 +1281,7 @@ onUnmounted(() => { window.removeEventListener('mousemove', onBarMouseMove, { ca
   <!-- Invite only for now (Ames 2026-10-24): players not on Pilot testers. -->
   <beta-gate />
   <principles-gate />
+  <pyr-news-card />
   <user-profile-panel v-if="showProfile" :view-user-id="profileUserId" :initial-tab="profileInitialTab" @hide="showProfile = false; profileUserId = null; profileInitialTab = undefined" @open-settings="profileInitialTab = 'settings'; showProfile = true" />
   <feedback-modal v-if="showFeedback" @hide="showFeedback = false" />
   <nurro-profile v-if="showNurroProfile" @hide="showNurroProfile = false" />

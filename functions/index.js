@@ -2455,6 +2455,7 @@ exports.ewAccessRequest = onRequest(
       const data = await require("./access-request").handle(action, args, { sb, me, who, isAdmin, isPilot,
         wake: wakeBetaBoard, marks: betaMarkStore, principles: principlesStore, datasetMarks: datasetMarkStore,
         welcomeSent: welcomeSentStore,
+        newsLink: (email) => require("./blog-mail").newsLinkUrl(email, resendKey.value().trim()),
         sendEmail: async (msg) => {
           try {
             const r = await fetch("https://api.resend.com/emails", {
@@ -3061,8 +3062,13 @@ function blogMailIo() {
     resend, cache: blogMailCache,
     subscribers: {
       set: (email, v) => doc("blog_subscribers", email).set(v, { merge: true }),
-      update: (email, v) => doc("blog_subscribers", email).set(v, { merge: true }),
     },
+    // Pyr news answers, by email: {answer: yes|no, from, at, bellAt}.
+    newsAnswers: {
+      get: async (email) => { const d = await doc("pyr_news", email).get(); return d.exists ? d.data() : null; },
+      set: (email, v) => doc("pyr_news", email).set(v, { merge: true }),
+    },
+    linkKey: key,
     sentPosts: {
       get: async (id) => { const d = await doc("blog_mail_posts", id).get(); return d.exists ? d.data() : null; },
       set: (id, v) => doc("blog_mail_posts", id).set(v, { merge: true }),
@@ -3097,7 +3103,7 @@ function blogMailIo() {
   };
 }
 exports.ewBlogMail = onRequest(
-  { region: "us-central1", secrets: [resendKey, ewServiceKey], cors: [/^https:\/\/(www\.)?connectome\.quest$/, /^http:\/\/localhost(:\d+)?$/], invoker: "public", maxInstances: 5 },
+  { region: "us-central1", secrets: [resendKey, ewServiceKey], cors: [...EW_ORIGINS, /^https:\/\/www\.connectome\.quest$/], invoker: "public", maxInstances: 5 },
   async (req, res) => {
     res.set("Cache-Control", "no-store");
     if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
@@ -3116,6 +3122,25 @@ exports.ewBlogMail = onRequest(
       if (action === "health") {
         try { await blogMailIo().resend("/segments"); return res.json({ ok: true, key: "full access", live: require("./blog-mail").LIVE }); }
         catch (e) { return res.json({ ok: false, key: e.status === 401 ? "sending only" : `error ${e.status || ""}`.trim() }); }
+      }
+      // Signed in Pyr players: Pyr news (blog-mail.js). Their own email only.
+      if (["news.status", "news.answer", "news.bell"].includes(action)) {
+        const who = await ewVerify(args.token);
+        if (!who || !who.email) return res.status(401).json({ error: "Sign in to Pyr again, then retry." });
+        if (!(await rateLimit({ ip: who.email }, true, "write:news")).ok) return res.status(429).json({ error: "Please wait a moment, then try again." });
+        const sb = ewSb(ewServiceKey.value().trim());
+        const { me } = await pilotContext(sb, who);
+        const bm = require("./blog-mail"), io = blogMailIo();
+        let data;
+        if (action === "news.status") data = await bm.newsStatus(io, { email: who.email });
+        else if (action === "news.answer") data = await bm.newsAnswer(io, { email: who.email, name: args.name || (me && (me.display_name || me.username)) || "", yes: args.yes === true, from: String(args.from || "") });
+        else {
+          // A bell needs a Pyr profile to land in.
+          if (!me) return res.json({ ok: true, data: { bell: false } });
+          io.bell = (title, body, sendAt) => sb("notifications", { method: "POST", body: JSON.stringify({ title, body, target_type: "user", target_id: me.id, send_at: sendAt, created_by: me.id }) });
+          data = await bm.newsBell(io, { email: who.email });
+        }
+        return res.json({ ok: true, data });
       }
       const data = await require("./blog-mail").handle(action, args, blogMailIo());
       res.json({ ok: true, ...data });
