@@ -38,9 +38,9 @@ const notesOffUrl = (s) => `${ENDPOINT}?action=notes-off&e=${encodeURIComponent(
 // Resend takes at most 100 emails in one batch call.
 const BATCH = 100;
 // Like LIVE: nothing goes to real subscribers until Ames has seen a test.
-const NOTES_LIVE = false;
+const NOTES_LIVE = true;
 // Weeks due before this never go (set when NOTES_LIVE turns on).
-const NOTES_LIVE_SINCE = '2099-01-01T00:00:00Z';
+const NOTES_LIVE_SINCE = '2026-11-13T00:00:00Z';
 // A finished week goes out from this long after its Monday (the next Monday,
 // 14:00 UTC, after Sunday's Today in Pyr has been added to it).
 const NOTES_SEND_AFTER_MS = (7 * 24 + 14) * 60 * 60 * 1000;

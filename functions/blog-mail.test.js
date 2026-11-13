@@ -217,7 +217,7 @@ test('check: a finished week goes once to its own list, never while it is still 
     assert.ok(!batches.some((c) => c.body.some((m) => m.to[0] === 'gone@example.com')));
     assert.deepStrictEqual((await bm.handle('check', {}, x)).notes, undefined, 'never twice');
   } finally { Date.now = realNow; }
-  assert.strictEqual(bm.NOTES_LIVE, false, 'nothing goes to real subscribers until Ames has seen a test');
+  assert.strictEqual(bm.NOTES_LIVE, true, 'on since Ames approved it, 2026-11-12');
 });
 
 test('check: a week that stopped part way goes on to the rest, not again to the first', async () => {
