@@ -942,6 +942,14 @@ async function helpRequestFor(n: any): Promise<string | null> {
 
 /** Sanitize stored Markdown, including generated URLs; remote images are omitted. */
 const renderMarkdown = (text: string) => renderSafeMarkdown(text, true);
+/** A "Read it on the blog" link on a line of its own (the New on the blog
+ *  notice) is drawn as a button, not a plain link (Ames 2026-11-20: "Can we
+ *  make the read it on the blog link into a button?"). Runs after the
+ *  sanitizer, and only adds a class to a link it already allowed. */
+function blogButtons(html: string): string {
+  return html.replace(/<p>\s*<a ([^>]*)>(Read (?:it|every update) on the blog)<\/a>\s*<\/p>/g,
+    (_m, attrs: string, label: string) => `<p class="nge-notif-blog-cta"><a ${attrs} class="nge-notif-blog-btn">${label} <span aria-hidden="true">→</span></a></p>`);
+}
 
 // A wide picture (a screenshot, a render) gets the larger share of a wider
 // card; a square or tall one (a Nurro card) keeps the narrower column, where
@@ -1534,7 +1542,7 @@ function padRank(rank: number): string {
                   <div class="nge-notif-detail-rule" aria-hidden="true"></div>
                   <div
                     class="nge-notif-detail-body"
-                    v-html="withVideoEmbeds(renderMarkdown(cleanCopy(detailBody)))"
+                    v-html="blogButtons(withVideoEmbeds(renderMarkdown(cleanCopy(detailBody))))"
                     @click="onDetailBodyClick"
                   ></div>
                   <div v-if="playBlocked" class="nge-notif-blocked" role="alert">
@@ -2480,6 +2488,14 @@ span.nge-notif-reply-part { cursor: default; }
 .nge-notif-blocked-go { padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(143, 214, 255, 0.7); background: rgba(74, 158, 255, 0.25); color: #fff; font: 600 13px Inter, sans-serif; cursor: pointer; }
 .nge-notif-blocked-go:hover { background: rgba(74, 158, 255, 0.4); }
 .nge-notif-blocked-no { padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(127, 190, 255, 0.28); background: transparent; color: #a9c3e0; font: 500 13px Inter, sans-serif; cursor: pointer; }
+/* "Read it on the blog", drawn as a button in the circuit style. */
+.nge-notif-detail-body :deep(p.nge-notif-blog-cta) { margin: 4px 0 14px; }
+.nge-notif-detail-body :deep(a.nge-notif-blog-btn) { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px;
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  background: linear-gradient(180deg, rgba(66, 213, 236, 0.95), rgba(32, 150, 205, 0.95)); color: #04121f !important;
+  font: 700 13px/1 Orbitron, Inter, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; text-decoration: none !important;
+  filter: drop-shadow(0 0 8px rgba(66, 213, 236, 0.45)); cursor: pointer; transition: transform 0.15s ease, filter 0.15s ease; }
+.nge-notif-detail-body :deep(a.nge-notif-blog-btn):hover { transform: translateY(-1px); filter: drop-shadow(0 0 14px rgba(66, 213, 236, 0.7)); }
 /* The Play Lost Fragments link, drawn as a big gold button. */
 .nge-notif-detail-body :deep(a[href="#nge-play=lost-fragments"]) { display: inline-flex; align-items: center; gap: 8px; margin: 6px 0 2px; padding: 11px 22px;
   border-radius: 10px; border: 1px solid rgba(255, 211, 90, 0.8); background: linear-gradient(180deg, #ffd35a, #e6a91f);

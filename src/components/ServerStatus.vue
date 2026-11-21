@@ -126,32 +126,37 @@ onUnmounted(() => clearInterval(timer));
 </template>
 
 <style>
-.nge-srv { margin: 0 0 14px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(110,150,220,.25); background: rgba(14,22,40,.75); }
-.nge-srv--compact { padding: 0; }
-.nge-srv--compact > :not(.nge-srv-line) { margin-left: 14px; margin-right: 14px; }
-.nge-srv--compact > :last-child:not(.nge-srv-line) { margin-bottom: 12px; }
-.nge-srv-line { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.nge-srv-line-k { color: #93a8c6; font-size: 12.5px; }
-.nge-srv-line-v { color: #dbe6f5; font-size: 13px; font-weight: 600; }
-.nge-srv-v--slow { color: #f5c76a; } .nge-srv-v--down { color: #ff9a9a; }
-.nge-srv-caret { margin-left: auto; color: #93a8c6; }
-.nge-srv-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-.nge-srv-title { font-weight: 700; font-size: 15px; color: #eef4ff; }
-.nge-srv-sub { color: #93a8c6; font-size: 12.5px; flex: 1; min-width: 220px; }
-.nge-srv-again { padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(120,170,255,.4); background: rgba(60,100,170,.25); color: #dbe8ff; font: inherit; font-size: 12px; cursor: pointer; }
-.nge-srv-again:hover { background: rgba(80,130,210,.35); }
-.nge-srv-grid { display: flex; flex-direction: column; gap: 6px; }
-.nge-srv-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 10px; border-radius: 8px; background: rgba(24,38,66,.85); }
-.nge-srv-name { min-width: 170px; color: #f2f7ff; font-weight: 600; font-size: 13px; }
-.nge-srv-check { display: inline-flex; align-items: center; gap: 6px; color: #c9d7ea; font-size: 12.5px; }
-.nge-srv-check i { width: 9px; height: 9px; border-radius: 50%; background: #6b7a90; }
-.nge-srv--ok i { background: #5fcf8f; box-shadow: 0 0 6px rgba(95,207,143,.7); }
-.nge-srv--slow i { background: #f5c76a; box-shadow: 0 0 6px rgba(245,199,106,.7); }
-.nge-srv--down i { background: #ff6b6b; box-shadow: 0 0 6px rgba(255,107,107,.7); }
-.nge-srv--checking i { animation: nge-srv-pulse 1s ease-in-out infinite; }
-.nge-srv--ok b { color: #9fe0b8; } .nge-srv--slow b { color: #f5c76a; } .nge-srv--down b { color: #ff9a9a; }
-.nge-srv-ms { color: #8197b5; font-variant-numeric: tabular-nums; }
-.nge-srv-foot { margin: 8px 0 0; color: #8197b5; font-size: 12px; }
+/* Every rule starts at .nge-srv, so the game's general button look
+   (centered, no padding, a light gray on hover) never reaches in here. */
+.nge-srv { flex-shrink: 0; margin: 0 0 14px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(66,213,236,.22); background: rgba(10,18,36,.8); }
+.nge-srv.nge-srv--compact { padding: 0; }
+.nge-srv.nge-srv--compact > :not(.nge-srv-line) { margin-left: 14px; margin-right: 14px; }
+.nge-srv.nge-srv--compact > :last-child:not(.nge-srv-line) { margin-bottom: 12px; }
+.nge-srv .nge-srv-line { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; white-space: normal; cursor: pointer; transition: background-color .15s ease; }
+.nge-srv .nge-srv-line:hover { background: rgba(66,213,236,.07); }
+.nge-srv .nge-srv-line:focus-visible { outline: 1px solid rgba(66,213,236,.6); outline-offset: -1px; }
+.nge-srv .nge-srv-line[aria-expanded="true"] { border-radius: 10px 10px 0 0; border-bottom: 1px solid rgba(66,213,236,.16); margin-bottom: 10px; }
+.nge-srv .nge-srv-line-k { font-family: 'Orbitron', 'Inter', sans-serif; font-size: 10.5px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: #6fd8ea; }
+.nge-srv .nge-srv-line-v { color: #dbe6f5; font-size: 13px; font-weight: 600; }
+.nge-srv .nge-srv-v--slow { color: #f5c76a; } .nge-srv .nge-srv-v--down { color: #ff9a9a; }
+.nge-srv .nge-srv-caret { margin-left: auto; color: #6fd8ea; font-size: 11px; }
+.nge-srv .nge-srv-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.nge-srv .nge-srv-title { font-family: 'Orbitron', 'Inter', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: #6fd8ea; }
+.nge-srv .nge-srv-sub { color: #93a8c6; font-size: 12.5px; flex: 1; min-width: 220px; }
+.nge-srv .nge-srv-again { padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(66,213,236,.45); background: rgba(66,213,236,.10); color: #dff8ff; font: inherit; font-size: 12px; cursor: pointer; transition: background-color .15s ease; }
+.nge-srv .nge-srv-again:hover { background: rgba(66,213,236,.22); }
+.nge-srv .nge-srv-grid { display: flex; flex-direction: column; gap: 6px; }
+.nge-srv .nge-srv-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(110,150,220,.14); background: rgba(20,32,58,.7); }
+.nge-srv .nge-srv-name { min-width: 170px; color: #f2f7ff; font-weight: 600; font-size: 13px; }
+.nge-srv .nge-srv-check { display: inline-flex; align-items: center; gap: 6px; color: #c9d7ea; font-size: 12.5px; }
+.nge-srv .nge-srv-check i { width: 9px; height: 9px; border-radius: 50%; background: #6b7a90; flex: none; }
+.nge-srv .nge-srv--ok i { background: #5fcf8f; box-shadow: 0 0 6px rgba(95,207,143,.7); }
+.nge-srv .nge-srv--slow i { background: #f5c76a; box-shadow: 0 0 6px rgba(245,199,106,.7); }
+.nge-srv .nge-srv--down i { background: #ff6b6b; box-shadow: 0 0 6px rgba(255,107,107,.7); }
+.nge-srv .nge-srv--checking i { animation: nge-srv-pulse 1s ease-in-out infinite; }
+.nge-srv .nge-srv--ok b { color: #9fe0b8; } .nge-srv .nge-srv--slow b { color: #f5c76a; } .nge-srv .nge-srv--down b { color: #ff9a9a; }
+.nge-srv .nge-srv-ms { color: #8197b5; font-variant-numeric: tabular-nums; }
+.nge-srv .nge-srv-foot { margin: 10px 0 0; color: #8197b5; font-size: 12px; }
 @keyframes nge-srv-pulse { 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { .nge-srv--checking i { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .nge-srv .nge-srv--checking i { animation: none; } }
 </style>
