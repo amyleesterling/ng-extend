@@ -130,7 +130,7 @@ onUnmounted(() => clearInterval(timer));
 .nge-srv--compact { padding: 0; }
 .nge-srv--compact > :not(.nge-srv-line) { margin-left: 14px; margin-right: 14px; }
 .nge-srv--compact > :last-child:not(.nge-srv-line) { margin-bottom: 12px; }
-.nge-srv-line { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.nge-srv .nge-srv-line { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .nge-srv-line-k { color: #93a8c6; font-size: 12.5px; }
 .nge-srv-line-v { color: #dbe6f5; font-size: 13px; font-weight: 600; }
 .nge-srv-v--slow { color: #f5c76a; } .nge-srv-v--down { color: #ff9a9a; }
@@ -138,7 +138,7 @@ onUnmounted(() => clearInterval(timer));
 .nge-srv-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .nge-srv-title { font-weight: 700; font-size: 15px; color: #eef4ff; }
 .nge-srv-sub { color: #93a8c6; font-size: 12.5px; flex: 1; min-width: 220px; }
-.nge-srv-again { padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(120,170,255,.4); background: rgba(60,100,170,.25); color: #dbe8ff; font: inherit; font-size: 12px; cursor: pointer; }
+.nge-srv .nge-srv-again { padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(120,170,255,.4); background: rgba(60,100,170,.25); color: #dbe8ff; font: inherit; font-size: 12px; cursor: pointer; }
 .nge-srv-again:hover { background: rgba(80,130,210,.35); }
 .nge-srv-grid { display: flex; flex-direction: column; gap: 6px; }
 .nge-srv-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 10px; border-radius: 8px; background: rgba(24,38,66,.85); }
