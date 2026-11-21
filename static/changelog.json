@@ -2,10 +2,11 @@
   "about": "What changed in Pyr, for players. Newest first. Every deploy that changes something a player can see or do adds an entry at the top: 'at' is when it went live (UTC), the title names it, and each item is one plain sentence a player would understand, with no code words. The game shows these in the 'New version ready' notice. See CHANGELOG-RULE in README.md.",
   "entries": [
     {
-      "at": "2026-11-21T01:51:00Z",
-      "title": "A tidier Server status line",
+      "at": "2026-11-21T02:02:00Z",
+      "title": "A cleaner Server status, and a blog button",
       "items": [
-        "The Server status line in Profile, Datasets now reads clearly, with space between the light, the words and the status, and its Check again button has its padding back."
+        "The Server status line in Profile, Datasets is easier to read, with a cyan heading, clear spacing and no gray flash when you point at it.",
+        "In a New on the blog notification, Read it on the blog is now a button."
       ]
     },
     {
