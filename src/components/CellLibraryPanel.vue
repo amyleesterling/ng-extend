@@ -3445,9 +3445,20 @@ function placeStartNote() {
     el = (panels.find(p => p.projectionParameters && p.element)?.element as HTMLElement | undefined) ?? null;
   } catch { el = null; }
   const r = el?.getBoundingClientRect();
-  startNotePos.value = r && r.width > 120 && r.height > 80
-    ? { left: `${Math.round(r.left + r.width / 2)}px`, top: `${Math.round(Math.max(96, r.top + 28))}px` }
-    : null;
+  const left = r && r.width > 120 && r.height > 80 ? r.left + r.width / 2 : window.innerWidth / 2;
+  let top = r && r.width > 120 && r.height > 80 ? Math.max(96, r.top + 28) : 96;
+  // Never under the slim bar or the library (Ames 2026-11-24: the note sat
+  // behind the quest bar): it goes just below whatever it would overlap.
+  const half = 200, tall = 110;
+  for (const sel of ['.nge-cl-panel', '.nge-hl-panel']) {
+    const b = (document.querySelector(sel) as HTMLElement | null)?.getBoundingClientRect();
+    if (!b || !b.width || !b.height) continue;
+    const across = left + half > b.left && left - half < b.right;
+    const down = top + tall > b.top && top < b.bottom;
+    if (across && down) top = b.bottom + 14;
+  }
+  if (top + tall > window.innerHeight - 12) top = Math.max(12, window.innerHeight - tall - 12);
+  startNotePos.value = { left: `${Math.round(left)}px`, top: `${Math.round(top)}px` };
 }
 let startNoteTimer: ReturnType<typeof setTimeout> | null = null;
 function showStartNote(text: string, ms = 4200, cellName?: string, kicker = 'Teleport complete') {
@@ -3457,6 +3468,8 @@ function showStartNote(text: string, ms = 4200, cellName?: string, kicker = 'Tel
   const c = currentCell();
   startNoteCell.value = cellName ?? (c ? (history.getNickname(c.segId) || c.liveSegId || c.segId) : '');
   placeStartNote();
+  // The library often slims just after landing: look again once it settles.
+  for (const t of [350, 900]) setTimeout(() => { if (startNote.value === text) placeStartNote(); }, t);
   startNoteN.value++;
   if (startNoteTimer) clearTimeout(startNoteTimer);
   startNoteTimer = setTimeout(() => { startNote.value = ''; startNoteTimer = null; }, ms);
@@ -6011,7 +6024,7 @@ onBeforeUnmount(() => {
 .nge-cl-play-here-hint { font-size: 12px; color: #9fb4cc; }
 /* "Your new cell": a hologram flash at the top of the view, then gone. */
 .nge-cl-newcell {
-  position: fixed; top: 96px; left: 50%; z-index: 950; transform: translateX(-50%);
+  position: fixed; top: 96px; left: 50%; z-index: 10030; transform: translateX(-50%);
   display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 34px 14px;
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
   background: linear-gradient(160deg, rgba(10, 52, 52, 0.92), rgba(6, 14, 28, 0.94));
