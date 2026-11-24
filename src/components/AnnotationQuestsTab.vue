@@ -214,9 +214,17 @@ async function playSkip(which?: QuestRow) {
     else message.value = 'No more quest cells are open right now.';
   } finally { skippingQuest.value = false; }
 }
-/** The "Teleport complete" flash over the view (CellLibraryPanel shows it). */
+/** On the slim bar, the bar itself says "Teleport complete" and glows for a
+ *  few seconds (Ames 2026-11-24: the card over the view hid behind the bar).
+ *  In the full view, the card over the view (CellLibraryPanel shows it). */
+const arrived = ref('');
+let arrivedTimer: ReturnType<typeof setTimeout> | null = null;
 function landed(title: string, r: QuestRow) {
-  document.dispatchEvent(new CustomEvent('nge:play-landed', { detail: { title, cell: label(r) } }));
+  if (props.slim) {
+    arrived.value = r.segmentId;
+    if (arrivedTimer) clearTimeout(arrivedTimer);
+    arrivedTimer = setTimeout(() => { arrived.value = ''; arrivedTimer = null; }, 4200);
+  } else document.dispatchEvent(new CustomEvent('nge:play-landed', { detail: { title, cell: label(r) } }));
   // Saved as you arrive, so the bar never says "Not saved yet" (Ames 2026-11-12).
   setTimeout(() => {
     if (!questWork.savedAt[r.segmentId] && questOnScreen(r.segmentId)) void saveQuestWork(r.segmentId);
@@ -615,7 +623,7 @@ const noPoints = computed(() => points.value === 0 && form.value.status.startsWi
         <template v-if="mineShown.length">
           <div v-if="!slim" class="nge-aq-section">Yours</div>
           <template v-for="r in mineShown" :key="r.segmentId">
-            <div class="nge-aq-row nge-aq-row--mine" :class="{ 'nge-aq-row--current': current === r.segmentId && !isActive(r), 'nge-aq-row--active': isActive(r), 'nge-aq-row--clickable': slim }"
+            <div class="nge-aq-row nge-aq-row--mine" :class="{ 'nge-aq-row--current': current === r.segmentId && !isActive(r), 'nge-aq-row--active': isActive(r), 'nge-aq-row--clickable': slim, 'nge-aq-row--arrived': slim && arrived === r.segmentId }"
                  :title="slim ? (open === r.segmentId ? 'Click to fold the form away' : 'Click to submit this quest') : undefined"
                  @click="slim && onSlimRowClick(r, $event)">
               <div class="nge-aq-row-left">
@@ -634,7 +642,8 @@ const noPoints = computed(() => points.value === 0 && form.value.status.startsWi
               <div class="nge-aq-row-actions">
                 <!-- The instructions, on the slim bar too (Ames 2026-11-17: Play hid them). -->
                 <button v-if="slim" class="nge-aq-info nge-aq-info--slim" :class="{ 'nge-aq-info--open': showHelp }" @click="toggleHelp" title="How to do a Cilia Quest" aria-label="Instructions"><span class="nge-aq-info-i" aria-hidden="true">i</span></button>
-                <span v-if="slim" class="nge-aq-saved nge-aq-saved--slim" :class="{ 'nge-aq-saved--bad': isActive(r) && !!questWork.error && questWork.saving !== r.segmentId }" :title="savedLine(r)">
+                <span v-if="slim && arrived === r.segmentId" class="nge-aq-arrived" role="status" aria-live="polite">Teleport complete</span>
+                <span v-else-if="slim" class="nge-aq-saved nge-aq-saved--slim" :class="{ 'nge-aq-saved--bad': isActive(r) && !!questWork.error && questWork.saving !== r.segmentId }" :title="savedLine(r)">
                   <span>{{ savedLine(r) }}</span>
                   <button v-if="isActive(r)" class="nge-aq-save" :disabled="questWork.saving === r.segmentId" @click="saveNow(r)" title="Save your work on this quest now. It is also saved as you place annotations.">Save</button>
                 </span>
@@ -855,6 +864,16 @@ const noPoints = computed(() => points.value === 0 && form.value.status.startsWi
 .nge-aq--slim .nge-aq-row--clickable:hover { background-color: transparent; background-size: 100% 100%; }
 @media (prefers-reduced-motion: reduce) { .nge-aq--slim .nge-aq-row--clickable { transition: none; } }
 .nge-aq--slim .nge-aq-form { margin: 6px 0 4px -40px; }
+/* Just landed: the bar glows and says so, then settles back. */
+.nge-aq-arrived { margin-right: 8px; font: 600 11px 'Orbitron', 'Inter', sans-serif; letter-spacing: 0.16em; text-transform: uppercase; white-space: nowrap;
+  color: #3eecbe; text-shadow: 0 0 10px rgba(62, 236, 190, 0.7); animation: nge-aq-arrived-in 4200ms ease both; }
+@keyframes nge-aq-arrived-in { 0% { opacity: 0; letter-spacing: 0.5em; } 12%, 85% { opacity: 1; letter-spacing: 0.16em; } 100% { opacity: 0; } }
+.nge-aq--slim .nge-aq-row--arrived { animation: nge-aq-arrived-glow 4200ms ease-out both; }
+@keyframes nge-aq-arrived-glow {
+  0% { box-shadow: inset 0 0 0 1px rgba(62, 236, 190, 0.9), 0 0 22px rgba(62, 236, 190, 0.55); background-color: rgba(62, 236, 190, 0.16); }
+  100% { box-shadow: inset 0 0 0 1px rgba(62, 236, 190, 0), 0 0 0 rgba(62, 236, 190, 0); background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .nge-aq-arrived, .nge-aq--slim .nge-aq-row--arrived { animation: none; } }
 .nge-aq-row--clickable { cursor: pointer; }
 .nge-aq-active-pill { display: inline-block; margin-left: 8px; padding: 0 8px; border-radius: 999px; font: 700 11px/18px 'Inter', 'Roboto', sans-serif; letter-spacing: 0.04em; color: #08140e; background: #7CFFB2; vertical-align: 2px; }
 .nge-aq-cellid { font-family: 'JetBrains Mono', 'Consolas', monospace; color: #b4c8de; user-select: text; }
