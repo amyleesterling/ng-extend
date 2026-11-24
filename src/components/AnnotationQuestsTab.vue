@@ -218,12 +218,32 @@ async function playSkip(which?: QuestRow) {
  *  few seconds (Ames 2026-11-24: the card over the view hid behind the bar).
  *  In the full view, the card over the view (CellLibraryPanel shows it). */
 const arrived = ref('');
+/** The words decode in, sci-fi style: random glyphs settle letter by letter. */
+const ARRIVED_TEXT = 'Teleport complete';
+const arrivedText = ref(ARRIVED_TEXT);
 let arrivedTimer: ReturnType<typeof setTimeout> | null = null;
+let decodeTimer: ReturnType<typeof setInterval> | null = null;
+function decodeArrived() {
+  if (decodeTimer) clearInterval(decodeTimer);
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { arrivedText.value = ARRIVED_TEXT; return; }
+  const glyphs = 'ABCDEFGHKLMNPRSTUVXZ0123456789<>/+*';
+  let tick = 0;
+  decodeTimer = setInterval(() => {
+    tick++;
+    const settled = Math.floor((tick - 4) / 1.2);
+    arrivedText.value = [...ARRIVED_TEXT].map((ch, i) => ch === ' ' || i < settled ? ch : glyphs[Math.floor(Math.random() * glyphs.length)]).join('');
+    if (settled >= ARRIVED_TEXT.length) { clearInterval(decodeTimer!); decodeTimer = null; arrivedText.value = ARRIVED_TEXT; }
+  }, 32);
+}
+onUnmounted(() => { if (decodeTimer) clearInterval(decodeTimer); if (arrivedTimer) clearTimeout(arrivedTimer); });
 function landed(title: string, r: QuestRow) {
   if (props.slim) {
-    arrived.value = r.segmentId;
+    // Off for a frame first, so a second landing plays it again from the start.
+    arrived.value = '';
+    requestAnimationFrame(() => { arrived.value = r.segmentId; decodeArrived(); });
+    setTimeout(() => { if (!arrived.value) { arrived.value = r.segmentId; decodeArrived(); } }, 120);
     if (arrivedTimer) clearTimeout(arrivedTimer);
-    arrivedTimer = setTimeout(() => { arrived.value = ''; arrivedTimer = null; }, 4200);
+    arrivedTimer = setTimeout(() => { arrived.value = ''; arrivedTimer = null; }, 4400);
   } else document.dispatchEvent(new CustomEvent('nge:play-landed', { detail: { title, cell: label(r) } }));
   // Saved as you arrive, so the bar never says "Not saved yet" (Ames 2026-11-12).
   setTimeout(() => {
@@ -626,6 +646,10 @@ const noPoints = computed(() => points.value === 0 && form.value.status.startsWi
             <div class="nge-aq-row nge-aq-row--mine" :class="{ 'nge-aq-row--current': current === r.segmentId && !isActive(r), 'nge-aq-row--active': isActive(r), 'nge-aq-row--clickable': slim, 'nge-aq-row--arrived': slim && arrived === r.segmentId }"
                  :title="slim ? (open === r.segmentId ? 'Click to fold the form away' : 'Click to submit this quest') : undefined"
                  @click="slim && onSlimRowClick(r, $event)">
+              <!-- Landing: a beam sweeps the bar and a few sparks fly (Ames 2026-11-24: "make sure it's a cool UI"). -->
+              <span v-if="slim && arrived === r.segmentId" class="nge-aq-beam" aria-hidden="true">
+                <i v-for="n in 7" :key="n" class="nge-aq-spark" :style="{ '--n': n }"></i>
+              </span>
               <div class="nge-aq-row-left">
                 <span v-if="!slim" class="nge-aq-pip nge-aq-pip--claimed"></span>
                 <div class="nge-aq-row-info">
@@ -642,7 +666,10 @@ const noPoints = computed(() => points.value === 0 && form.value.status.startsWi
               <div class="nge-aq-row-actions">
                 <!-- The instructions, on the slim bar too (Ames 2026-11-17: Play hid them). -->
                 <button v-if="slim" class="nge-aq-info nge-aq-info--slim" :class="{ 'nge-aq-info--open': showHelp }" @click="toggleHelp" title="How to do a Cilia Quest" aria-label="Instructions"><span class="nge-aq-info-i" aria-hidden="true">i</span></button>
-                <span v-if="slim && arrived === r.segmentId" class="nge-aq-arrived" role="status" aria-live="polite">Teleport complete</span>
+                <span v-if="slim && arrived === r.segmentId" class="nge-aq-arrived" role="status" :aria-label="ARRIVED_TEXT">
+                  <svg class="nge-aq-arrived-check" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4 7.2 6.1 9.2 10 4.9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span aria-hidden="true">{{ arrivedText }}</span>
+                </span>
                 <span v-else-if="slim" class="nge-aq-saved nge-aq-saved--slim" :class="{ 'nge-aq-saved--bad': isActive(r) && !!questWork.error && questWork.saving !== r.segmentId }" :title="savedLine(r)">
                   <span>{{ savedLine(r) }}</span>
                   <button v-if="isActive(r)" class="nge-aq-save" :disabled="questWork.saving === r.segmentId" @click="saveNow(r)" title="Save your work on this quest now. It is also saved as you place annotations.">Save</button>
@@ -864,16 +891,50 @@ const noPoints = computed(() => points.value === 0 && form.value.status.startsWi
 .nge-aq--slim .nge-aq-row--clickable:hover { background-color: transparent; background-size: 100% 100%; }
 @media (prefers-reduced-motion: reduce) { .nge-aq--slim .nge-aq-row--clickable { transition: none; } }
 .nge-aq--slim .nge-aq-form { margin: 6px 0 4px -40px; }
-/* Just landed: the bar glows and says so, then settles back. */
-.nge-aq-arrived { margin-right: 8px; font: 600 11px 'Orbitron', 'Inter', sans-serif; letter-spacing: 0.16em; text-transform: uppercase; white-space: nowrap;
-  color: #3eecbe; text-shadow: 0 0 10px rgba(62, 236, 190, 0.7); animation: nge-aq-arrived-in 4200ms ease both; }
-@keyframes nge-aq-arrived-in { 0% { opacity: 0; letter-spacing: 0.5em; } 12%, 85% { opacity: 1; letter-spacing: 0.16em; } 100% { opacity: 0; } }
-.nge-aq--slim .nge-aq-row--arrived { animation: nge-aq-arrived-glow 4200ms ease-out both; }
+/* Just landed (Ames 2026-11-24): a teleport beam sweeps the bar, sparks fly,
+   the edge lights up, the cell name flashes in and "Teleport complete"
+   decodes beside the buttons, then it all settles back to the usual bar. */
+.nge-aq--slim .nge-aq-row--arrived { position: relative; isolation: isolate; animation: nge-aq-arrived-glow 4400ms ease-out both; }
 @keyframes nge-aq-arrived-glow {
-  0% { box-shadow: inset 0 0 0 1px rgba(62, 236, 190, 0.9), 0 0 22px rgba(62, 236, 190, 0.55); background-color: rgba(62, 236, 190, 0.16); }
+  0% { box-shadow: inset 0 0 0 1px rgba(62, 236, 190, 0), 0 0 0 rgba(62, 236, 190, 0); }
+  8% { box-shadow: inset 0 0 0 1px rgba(150, 255, 225, 1), 0 0 26px rgba(62, 236, 190, 0.7); background-color: rgba(62, 236, 190, 0.18); }
+  40% { box-shadow: inset 0 0 0 1px rgba(62, 236, 190, 0.7), 0 0 14px rgba(62, 236, 190, 0.35); background-color: rgba(62, 236, 190, 0.07); }
   100% { box-shadow: inset 0 0 0 1px rgba(62, 236, 190, 0), 0 0 0 rgba(62, 236, 190, 0); background-color: transparent; }
 }
-@media (prefers-reduced-motion: reduce) { .nge-aq-arrived, .nge-aq--slim .nge-aq-row--arrived { animation: none; } }
+.nge-aq-beam { position: absolute; inset: 0; z-index: -1; border-radius: 8px; overflow: hidden; pointer-events: none; }
+.nge-aq-beam::before { content: ''; position: absolute; top: -20%; bottom: -20%; width: 34%; left: -40%;
+  background: linear-gradient(90deg, rgba(62, 236, 190, 0), rgba(62, 236, 190, 0.35) 40%, rgba(235, 255, 250, 0.95) 50%, rgba(62, 236, 190, 0.35) 60%, rgba(62, 236, 190, 0));
+  filter: blur(1px); animation: nge-aq-beam 800ms cubic-bezier(.5, 0, .2, 1) 60ms both; }
+@keyframes nge-aq-beam { from { left: -40%; opacity: 1; } 80% { opacity: 1; } to { left: 110%; opacity: 0; } }
+/* Teleport motes: rise and fade along the bar as the beam passes. */
+.nge-aq-spark { position: absolute; left: calc(var(--n) * 12.5% - 4%); bottom: 18%; width: 4px; height: 4px; border-radius: 50%;
+  background: #e8fff8; box-shadow: 0 0 6px 2px rgba(62, 236, 190, 0.9), 0 0 14px 4px rgba(62, 236, 190, 0.35); opacity: 0;
+  animation: nge-aq-spark 1100ms ease-out calc(80ms + var(--n) * 85ms) both; }
+.nge-aq-spark:nth-child(even) { bottom: 46%; width: 3px; height: 3px; }
+@keyframes nge-aq-spark {
+  0% { opacity: 0; transform: translateY(4px) scale(0.4); }
+  20% { opacity: 1; transform: translateY(0) scale(1.2); }
+  100% { opacity: 0; transform: translateY(-16px) scale(0.5); }
+}
+.nge-aq--slim .nge-aq-row--arrived .nge-aq-row-name { animation: nge-aq-name-in 900ms ease-out both; }
+@keyframes nge-aq-name-in {
+  0% { color: #fff; text-shadow: 0 0 14px rgba(160, 255, 230, 1); letter-spacing: 0.12em; opacity: 0.3; }
+  50% { color: #fff; text-shadow: 0 0 10px rgba(62, 236, 190, 0.8); letter-spacing: 0; opacity: 1; }
+  100% { text-shadow: none; }
+}
+.nge-aq-arrived { display: inline-flex; align-items: center; gap: 6px; margin-right: 8px; white-space: nowrap;
+  font: 600 11px 'Orbitron', 'Inter', sans-serif; letter-spacing: 0.14em; text-transform: uppercase;
+  color: #3eecbe; text-shadow: 0 0 10px rgba(62, 236, 190, 0.7); animation: nge-aq-arrived-in 4400ms ease both; }
+@keyframes nge-aq-arrived-in { 0% { opacity: 0; transform: translateX(6px); } 8%, 88% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+.nge-aq-arrived-check { flex-shrink: 0; filter: drop-shadow(0 0 4px rgba(62, 236, 190, 0.9)); }
+.nge-aq-arrived-check circle { stroke-dasharray: 38; stroke-dashoffset: 38; animation: nge-aq-draw 500ms ease-out 250ms forwards; }
+.nge-aq-arrived-check path { stroke-dasharray: 10; stroke-dashoffset: 10; animation: nge-aq-draw 300ms ease-out 650ms forwards; }
+@keyframes nge-aq-draw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .nge-aq-arrived, .nge-aq--slim .nge-aq-row--arrived, .nge-aq--slim .nge-aq-row--arrived .nge-aq-row-name { animation: none; }
+  .nge-aq-beam { display: none; }
+  .nge-aq-arrived-check circle, .nge-aq-arrived-check path { animation: none; stroke-dashoffset: 0; }
+}
 .nge-aq-row--clickable { cursor: pointer; }
 .nge-aq-active-pill { display: inline-block; margin-left: 8px; padding: 0 8px; border-radius: 999px; font: 700 11px/18px 'Inter', 'Roboto', sans-serif; letter-spacing: 0.04em; color: #08140e; background: #7CFFB2; vertical-align: 2px; }
 .nge-aq-cellid { font-family: 'JetBrains Mono', 'Consolas', monospace; color: #b4c8de; user-select: text; }
